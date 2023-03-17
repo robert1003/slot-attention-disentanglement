@@ -4,6 +4,9 @@ model in order to make it match this TF implementation. Put this file in object_
 update paths below before running.
 
 A similar TF/torch converter for Slot Attention is implemented here: https://github.com/vadimkantorov/yet_another_pytorch_slot_attention
+
+Official TF implementation: https://github.com/google-research/google-research/tree/master/slot_attention/
+CLEVR Weights: https://console.cloud.google.com/storage/browser/gresearch/slot-attention/object-discovery;tab=objects?prefix=&forceOnObjectsSortingFiltering=false 
 """
 
 
@@ -25,7 +28,7 @@ batch_size = 1
 num_slots = 7
 num_iterations = 3
 resolution = (128, 128)
-ckpt_path = "/Users/andrewstange/Desktop/CMU/Spring_2023/16-824/Project/obj_disc_weights"               # Path to TF model checkpoint.
+ckpt_path = "/Users/andrewstange/Desktop/CMU/Spring_2023/16-824/Project/obj_disc_weights"               # Path to directory containing TF model checkpoint
 output_ckpt_path = "/Users/andrewstange/Desktop/CMU/Spring_2023/16-824/Project/torch_weight.pt"         # Path to store torch checkpoint
 
 # Path to torch implementation, rename model.py to torch_model.py to avoid file name conflicts with TF model.py
