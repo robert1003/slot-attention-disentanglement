@@ -27,9 +27,10 @@ class SlotAttention(nn.Module):
         self.fc1 = nn.Linear(dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, dim)
 
-        self.norm_input  = nn.LayerNorm(dim)
-        self.norm_slots  = nn.LayerNorm(dim)
-        self.norm_pre_ff = nn.LayerNorm(dim)
+        # tf.LayerNormalization uses eps=0.001
+        self.norm_input  = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
+        self.norm_slots  = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
+        self.norm_pre_ff = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
 
     def forward(self, inputs, num_slots = None):
         b, n, d = inputs.shape
@@ -165,7 +166,7 @@ class SlotAttentionAutoEncoder(nn.Module):
         self.fc1 = nn.Linear(hid_dim, hid_dim)
         self.fc2 = nn.Linear(hid_dim, hid_dim)
 
-        self.encoder_layer_norm = nn.LayerNorm(hid_dim, elementwise_affine=True)
+        self.encoder_layer_norm = nn.LayerNorm(hid_dim, elementwise_affine=True, eps=0.001)
         self.slot_attention = SlotAttention(
             num_slots=self.num_slots,
             dim=hid_dim,
