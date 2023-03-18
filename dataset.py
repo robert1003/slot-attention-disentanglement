@@ -1,33 +1,63 @@
 import os
 import random
 import json
+import glob
 import numpy as np
 from PIL import Image
 import torch
-from torchvision import transforms
+from torchvision import transforms, datasets
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.dataloader import default_collate
 
-class PARTNET(Dataset):
-    def __init__(self, split='train'):
-        super(PARTNET, self).__init__()
-        
-        assert split in ['train', 'val', 'test']
-        self.split = split
-        self.root_dir = your_path     
-        self.files = os.listdir(self.root_dir)
-        self.img_transform = transforms.Compose([
-               transforms.ToTensor()])
 
-    def __getitem__(self, index):
-        path = self.files[index]
-        image = Image.open(os.path.join(self.root_dir, path, "0.png")).convert("RGB")
-        image = image.resize((128 , 128))
-        image = self.img_transform(image)
-        sample = {'image': image}
 
-        return sample
-            
-    
+
+class CLEVR(torch.utils.data.Dataset):
+    """
+        Loads CLEVR dataset images
+        https://cs.stanford.edu/people/jcjohns/clevr/
+    """
+
+    def __init__(self, path, resolution, partition="train"):
+        # self.opt = opt
+        self.partition = partition
+        self.all_files = glob.glob(os.path.join(path, partition, f'CLEVR_{partition}_*'))
+        self.transforms = transforms.Compose(
+            (transforms.ToTensor(),
+            transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR))
+        )   
+        self.loader = datasets.folder.default_loader
+        self.resolution = resolution[0]
+
     def __len__(self):
-        return len(self.files)
+        return len(self.all_files)
+
+    def __getitem__(self, idx):
+        img = self.loader(self.all_files[idx])
+        img = self.transforms(img)
+        img = (img - 0.5) / 0.5
+        if len(img.shape) == 3:
+            img = img.unsqueeze(0)
+        img = img.clamp(-1, 1)
+        return img
+    
+
+
+
+
+class MultidSprites(Dataset):
+    """
+    Source: https://github.com/applied-ai-lab/genesis/blob/master/datasets/multid_config.py
+    """
+    def __init__(self, partition, resolution) -> None:
+        super().__init__()
+
+    def __len__():
+        return 0
+    
+    def __getitem__(self, index):
+        return super().__getitem__(index)
+    
+
+
+    

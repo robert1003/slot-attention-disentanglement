@@ -29,10 +29,18 @@ parser.add_argument('--num_epochs', default=1000, type=int, help='number of work
 opt = parser.parse_args()
 resolution = (128, 128)
 
+proj_dim = 1024     # 8192 used by VICReg
+proj_loss_weight = 1
+var_weight = 1         # from VICReg, have to finetune
+cov_weight = 25        # from VICReg, have to finetune
+
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-train_set = CLEVR('train')
-model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim).to(device)
+#train_set = MultidSprites('train', resolution)
+train_set = CLEVR(path='/Users/andrewstange/datasets/CLEVR_v1.0/images/', resolution=resolution, partition="train")
+model = SlotAttentionProjection(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, 
+                                proj_dim, var_weight, cov_weight).to(device)
 # model.load_state_dict(torch.load('./tmp/model6.ckpt')['model_state_dict'])
 
 criterion = nn.MSELoss()
@@ -65,8 +73,8 @@ for epoch in range(opt.num_epochs):
         optimizer.param_groups[0]['lr'] = learning_rate
         
         image = sample['image'].to(device)
-        recon_combined, recons, masks, slots = model(image)
-        loss = criterion(recon_combined, image)
+        recon_combined, recons, masks, slots, proj_loss = model(image)
+        loss = criterion(recon_combined, image) + proj_loss_weight * proj_loss
         total_loss += loss.item()
 
         del recons, masks, slots

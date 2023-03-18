@@ -207,3 +207,52 @@ class SlotAttentionAutoEncoder(nn.Module):
         # `recon_combined` has shape: [batch_size, width, height, num_channels].
 
         return recon_combined, recons, masks, slots
+
+
+
+
+class SlotAttentionProjection(SlotAttentionAutoEncoder):
+    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, var_weight, cov_weight):
+        super().__init__(resolution, num_slots, num_iterations, hid_dim)
+
+        self.projection_head = ProjectionHead(hid_dim, proj_dim, var_weight, cov_weight)
+
+    def forward(self, image):
+        recon_combined, recons, masks, slots = super().forward(image)
+
+        if self.training:
+            # Only run projection head when training
+            # TODO(as) make sure that slots is what we should be returning here...
+            return recon_combined, recons, masks, slots, self.projection_head(slots)
+
+        return recon_combined, recons, masks, slots, None
+
+
+
+
+class ProjectionHead(nn.Module):
+    def __init__(self, hid_dim, projection_dim, std_coeff, cov_coeff) -> None:
+        super().__init__()
+        self.std_coeff = std_coeff
+        self.cov_coeff = cov_coeff
+
+        # VICReg paper, Section 4.2. Two FC layers with non-linearities and a final linear layer
+        self.projector = nn.Sequential(
+            nn.Linear(hid_dim, projection_dim),
+            nn.BatchNorm1d(projection_dim),
+            nn.ReLU(),
+            nn.Linear(projection_dim, projection_dim),
+            nn.BatchNorm1d(projection_dim),
+            nn.ReLU(),
+            nn.Linear(projection_dim, projection_dim)
+        )
+
+
+    def forward(self, x):
+        # Given matrix of slot representations, return loss
+        x = self.projector(x)
+
+
+
+
+
