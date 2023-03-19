@@ -33,12 +33,12 @@ class PARTNET(Dataset):
         return len(self.files)
 
 class CLEVR(Dataset):
-    def __init__(self, split='train'):
+    def __init__(self, path, split='train'):
         super(CLEVR, self).__init__()
 
         assert split in ['train', 'val', 'test']
         self.split = split
-        self.root_dir = os.path.join('./data/CLEVR_v1.0/images', split)
+        self.root_dir = os.path.join(path, split)
         self.files = os.listdir(self.root_dir)
         self.img_transform = transforms.Compose([
                transforms.ToTensor()])
@@ -56,16 +56,16 @@ class CLEVR(Dataset):
         return len(self.files)
 
 class MultiDSprites(Dataset):
-    def __init__(self, split='train', unique=True):
+    def __init__(self, path='./data/multi_dsprites/processed', split='train', unique=True):
         super(MultiDSprites, self).__init__()
 
         assert split in ['train', 'val', 'test']
         file_split = {'train': 'training', 'val': 'validation', 'test': 'test'}[split]
         self.split = split
         self.unique = unique
-        self.data = np.load(os.path.join('./data/multi_dsprites/processed',
+        self.data = np.load(os.path.join(path,
             file_split + '_images_rand4_' + ('unique' if unique else '') + '.npy'))
-        self.mask = np.load(os.path.join('./data/multi_dsprites/processed',
+        self.mask = np.load(os.path.join(path,
             file_split + '_masks_rand4_' + ('unique' if unique else '') + '.npy'))
         self.img_transform = transforms.Compose([
                transforms.ToTensor()])

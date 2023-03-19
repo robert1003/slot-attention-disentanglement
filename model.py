@@ -184,11 +184,11 @@ class SlotAttentionAutoEncoder(nn.Module):
         # `x` has shape: [batch_size, width*height, input_size].
 
         # Slot Attention module.
-        slots = self.slot_attention(x)
+        slots_rep = self.slot_attention(x)
         # `slots` has shape: [batch_size, num_slots, slot_size].
 
         # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
-        slots = slots.reshape((-1, slots.shape[-1])).unsqueeze(1).unsqueeze(2)
+        slots = slots_rep.reshape((-1, slots_rep.shape[-1])).unsqueeze(1).unsqueeze(2)
         slots = slots.repeat((1, 8, 8, 1))
         
         # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
@@ -206,4 +206,87 @@ class SlotAttentionAutoEncoder(nn.Module):
         recon_combined = recon_combined.permute(0,3,1,2)
         # `recon_combined` has shape: [batch_size, width, height, num_channels].
 
-        return recon_combined, recons, masks, slots
+        return recon_combined, recons, masks, slots_rep
+
+
+
+
+class SlotAttentionProjection(SlotAttentionAutoEncoder):
+    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, variance_target=1, vis=False):
+        super().__init__(resolution, num_slots, num_iterations, hid_dim)
+
+        self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, variance_target, vis=vis)
+
+    def forward(self, image):
+        recon_combined, recons, masks, slots = super().forward(image)
+
+        if self.training:
+            # Only run projection head when training
+            return recon_combined, recons, masks, slots, self.projection_head(slots)
+
+        return recon_combined, recons, masks, slots, None
+
+
+
+
+class ProjectionHead(nn.Module):
+    def __init__(self, num_slots, hid_dim, projection_dim, variance_target, epsilon=0.0001, vis=False) -> None:
+        super().__init__()
+
+        self.proj_dim = projection_dim
+        self.gamma = variance_target
+        self.eps = epsilon      # small constant for numerical stability
+        self.vis = vis
+
+        # VICReg paper, Section 4.2. Two FC layers with non-linearities and a final linear layer
+        self.projector = nn.Sequential(
+            nn.Linear(hid_dim, projection_dim),
+            nn.BatchNorm1d(num_slots),
+            nn.ReLU(),
+            nn.Linear(projection_dim, projection_dim),
+            nn.BatchNorm1d(num_slots),
+            nn.ReLU(),
+            nn.Linear(projection_dim, projection_dim)
+        )
+
+
+    def forward(self, x):
+        """
+        Calculate projected slot-feature variance and covariance over all the slots for a single batch at once
+        TODO write over versions of covariance + batching described in proposal
+        """
+        # Given matrix of slot representations, return loss
+        proj = self.projector(x)
+
+        # Collect all slots over the entire batch
+        proj = proj.reshape((-1,) + proj.shape[2:])
+        
+        # Our "batch size" here is: (batch size) x (# slots)
+        proj_batch_sz = x.shape[0]
+
+        # Calculate covariance loss over projected slot features
+        cov = (proj.T @ proj) / (proj_batch_sz - 1)
+        cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.proj_dim)
+
+        # Calculate variance loss over projected slot features
+        std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
+        std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))       
+
+        out = {"std_loss": std_loss.detach().item(), "cov_loss": cov_loss.detach().item()}
+
+        if self.vis:
+            out['cov_mx'] = cov.detach()
+            out['std_vec'] = std.detach()
+
+        return out
+    
+    def _off_diagonal(self, x):
+        # Source: https://github.com/facebookresearch/vicreg/blob/4e12602fd495af83efd1631fbe82523e6db092e0/main_vicreg.py#L239
+        n, m = x.shape
+        assert n == m
+        return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+
+
+
+
+

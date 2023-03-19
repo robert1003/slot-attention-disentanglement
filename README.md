@@ -3,6 +3,24 @@
 
  The official Tensorflow repository has been released <a href="https://github.com/google-research/google-research/tree/master/slot_attention">here</a>. This repo should be a direct translation from the official Tensorflow repo to a PyTorch version.
 
+## Usage
+
+Download CLEVR dataset: https://cs.stanford.edu/people/jcjohns/clevr/
+
+Follow instructions here to set up Multid-Sprites: https://github.com/applied-ai-lab/genesis
+
+Run Slot Attention with Project Head
+
+```
+python train.py --dataset_path=~/datasets/CLEVR_v1.0/images/ --dataset=clevr
+```
+
+Run base Slot Attention model (no projection head)
+
+```
+python train.py --dataset_path=~/datasets/CLEVR_v1.0/images/ --dataset=clevr --base
+```
+
 ## Citation
 
 ```bibtex
