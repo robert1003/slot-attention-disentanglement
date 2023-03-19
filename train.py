@@ -37,6 +37,8 @@ parser.add_argument('--num_epochs', default=1000, type=int, help='number of work
 opt = parser.parse_args()
 
 writer = SummaryWriter(os.path.join(opt.log_dir, opt.name))
+os.makedirs(os.path.join(opt.model_dir, opt.name), exist_ok=False)
+os.makedirs(os.path.join(opt.image_dir, opt.name), exist_ok=False)
 resolution = (128, 128)
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
