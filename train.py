@@ -31,6 +31,7 @@ parser.add_argument('--proj_dim', default=1024, type=int, help='dimension of the
 parser.add_argument('--proj_weight', default=1.0, type=float, help='weight given to sum of projection head losses')
 parser.add_argument('--var_weight', default=1, type=float, help='weight given to the variance loss')
 parser.add_argument('--cov_weight', default=25, type=float, help='weight given to the covariance loss')
+parser.add_argument('--base', action='store_true', help='run base Slot Attention model, no projection head')
 
 opt = parser.parse_args()
 resolution = (128, 128)
@@ -43,7 +44,10 @@ else:
     #train_set = MultidSprites('train', resolution)
     raise NotImplementedError
 
-model = SlotAttentionProjection(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, opt.proj_dim).to(device)
+if opt.base:
+    model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim)
+else:
+    model = SlotAttentionProjection(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, opt.proj_dim).to(device)
 
 criterion = nn.MSELoss()
 
@@ -63,23 +67,24 @@ for epoch in range(opt.num_epochs):
 
     for sample in tqdm(train_dataloader):
         i += 1
-
         if i < opt.warmup_steps:
             learning_rate = opt.learning_rate * (i / opt.warmup_steps)
         else:
             learning_rate = opt.learning_rate
 
-        learning_rate = learning_rate * (opt.decay_rate ** (
-            i / opt.decay_steps))
-
+        learning_rate = learning_rate * (opt.decay_rate ** (i / opt.decay_steps))
         optimizer.param_groups[0]['lr'] = learning_rate
-        
         image = sample['image'].to(device)
-        recon_combined, recons, masks, slots, proj_loss_dict = model(image)
-        proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + opt.cov_weight * proj_loss_dict["cov_loss"]
-        loss = criterion(recon_combined, image) + opt.proj_weight * proj_loss
-        total_loss += loss.item()
+        
+        if opt.base:
+            recon_combined, recons, masks, slots, _ = model(image)
+            loss = criterion(recon_combined, image)
+        else: 
+            recon_combined, recons, masks, slots, proj_loss_dict = model(image)
+            proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + opt.cov_weight * proj_loss_dict["cov_loss"]
+            loss = criterion(recon_combined, image) + opt.proj_weight * proj_loss
 
+        total_loss += loss.item()
         del recons, masks, slots
 
         optimizer.zero_grad()
