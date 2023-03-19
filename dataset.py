@@ -36,10 +36,10 @@ class CLEVR(torch.utils.data.Dataset):
         img = self.loader(self.all_files[idx])
         img = self.transforms(img)
         img = (img - 0.5) / 0.5
-        if len(img.shape) == 3:
-            img = img.unsqueeze(0)
+        # if len(img.shape) == 3:
+        #     img = img.unsqueeze(0)
         img = img.clamp(-1, 1)
-        return img
+        return {"image": img}
     
 
 

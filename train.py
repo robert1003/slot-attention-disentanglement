@@ -25,23 +25,25 @@ parser.add_argument('--decay_rate', default=0.5, type=float, help='Rate for the 
 parser.add_argument('--decay_steps', default=100000, type=int, help='Number of steps for the learning rate decay.')
 parser.add_argument('--num_workers', default=4, type=int, help='number of workers for loading data')
 parser.add_argument('--num_epochs', default=1000, type=int, help='number of workers for loading data')
+parser.add_argument('--dataset', choices=['clevr', 'multid'], help='dataset to train on')
+parser.add_argument('--dataset_path', type=str, help='path to dataset')
+parser.add_argument('--proj_dim', default=1024, type=int, help='dimension of the projection space')
+parser.add_argument('--proj_weight', default=1.0, type=float, help='weight given to sum of projection head losses')
+parser.add_argument('--var_weight', default=1, type=float, help='weight given to the variance loss')
+parser.add_argument('--cov_weight', default=25, type=float, help='weight given to the covariance loss')
 
 opt = parser.parse_args()
 resolution = (128, 128)
-
-proj_dim = 1024     # 8192 used by VICReg
-proj_loss_weight = 1
-var_weight = 1         # from VICReg, have to finetune
-cov_weight = 25        # from VICReg, have to finetune
-
-
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-#train_set = MultidSprites('train', resolution)
-train_set = CLEVR(path='/Users/andrewstange/datasets/CLEVR_v1.0/images/', resolution=resolution, partition="train")
-model = SlotAttentionProjection(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, 
-                                proj_dim, var_weight, cov_weight).to(device)
-# model.load_state_dict(torch.load('./tmp/model6.ckpt')['model_state_dict'])
+
+if opt.dataset == "clevr":
+    train_set = CLEVR(path=opt.dataset_path, resolution=resolution, partition="train")
+else:
+    #train_set = MultidSprites('train', resolution)
+    raise NotImplementedError
+
+model = SlotAttentionProjection(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, opt.proj_dim).to(device)
 
 criterion = nn.MSELoss()
 
@@ -73,8 +75,9 @@ for epoch in range(opt.num_epochs):
         optimizer.param_groups[0]['lr'] = learning_rate
         
         image = sample['image'].to(device)
-        recon_combined, recons, masks, slots, proj_loss = model(image)
-        loss = criterion(recon_combined, image) + proj_loss_weight * proj_loss
+        recon_combined, recons, masks, slots, proj_loss_dict = model(image)
+        proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + opt.cov_weight * proj_loss_dict["cov_loss"]
+        loss = criterion(recon_combined, image) + opt.proj_weight * proj_loss
         total_loss += loss.item()
 
         del recons, masks, slots
@@ -89,6 +92,4 @@ for epoch in range(opt.num_epochs):
         datetime.timedelta(seconds=time.time() - start)))
 
     if not epoch % 10:
-        torch.save({
-            'model_state_dict': model.state_dict(),
-            }, opt.model_dir)
+        torch.save({'model_state_dict': model.state_dict()}, opt.model_dir)
