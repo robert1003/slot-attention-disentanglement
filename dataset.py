@@ -12,52 +12,62 @@ from torch.utils.data.dataloader import default_collate
 
 
 
-class CLEVR(torch.utils.data.Dataset):
-    """
-        Loads CLEVR dataset images
-        https://cs.stanford.edu/people/jcjohns/clevr/
-    """
+class CLEVR(Dataset):
+    def __init__(self, split='train'):
+        super(CLEVR, self).__init__()
 
-    def __init__(self, path, resolution, partition="train"):
-        # self.opt = opt
-        self.partition = partition
-        self.all_files = glob.glob(os.path.join(path, partition, f'CLEVR_{partition}_*'))
-        self.transforms = transforms.Compose(
-            (transforms.ToTensor(),
-            transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR))
-        )   
-        self.loader = datasets.folder.default_loader
-        self.resolution = resolution[0]
+        assert split in ['train', 'val', 'test']
+        self.split = split
+        self.root_dir = os.path.join('./data/CLEVR_v1.0/images', split)
+        self.files = os.listdir(self.root_dir)
+        self.img_transform = transforms.Compose([
+               transforms.ToTensor()])
+
+    def __getitem__(self, index):
+        path = self.files[index]
+        image = Image.open(os.path.join(self.root_dir, path)).convert("RGB")
+        image = image.resize((128 , 128))
+        image = self.img_transform(image)
+        sample = {'image': image}
+
+        return sample
 
     def __len__(self):
-        return len(self.all_files)
-
-    def __getitem__(self, idx):
-        img = self.loader(self.all_files[idx])
-        img = self.transforms(img)
-        img = (img - 0.5) / 0.5
-        # if len(img.shape) == 3:
-        #     img = img.unsqueeze(0)
-        img = img.clamp(-1, 1)
-        return {"image": img}
+        return len(self.files)
     
 
 
 
-
-class MultidSprites(Dataset):
+class MultiDSprites(Dataset):
     """
     Source: https://github.com/applied-ai-lab/genesis/blob/master/datasets/multid_config.py
     """
-    def __init__(self, partition, resolution) -> None:
-        super().__init__()
+    def __init__(self, split='train', unique=True):
+        super(MultiDSprites, self).__init__()
 
-    def __len__():
-        return 0
-    
+        assert split in ['train', 'val', 'test']
+        file_split = {'train': 'training', 'val': 'validation', 'test': 'test'}[split]
+        self.split = split
+        self.unique = unique
+        self.data = np.load(os.path.join('./data/multi_dsprites/processed',
+            file_split + '_images_rand4_' + ('unique' if unique else '') + '.npy'))
+        self.mask = np.load(os.path.join('./data/multi_dsprites/processed',
+            file_split + '_masks_rand4_' + ('unique' if unique else '') + '.npy'))
+        self.img_transform = transforms.Compose([
+               transforms.ToTensor()])
+
     def __getitem__(self, index):
-        return super().__getitem__(index)
-    
+        image = (self.data[index]*255).astype(np.uint8)
+        image = Image.fromarray(image)
+        image = image.resize((128 , 128))
+        image = self.img_transform(image)
+        sample = {'image': image}
+
+        return sample
+
+    def __len__(self):
+        return len(self.data)
+
 
 
     
