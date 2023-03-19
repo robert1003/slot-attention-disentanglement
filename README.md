@@ -5,6 +5,10 @@
 
 ## Usage
 
+Download CLEVR dataset: https://cs.stanford.edu/people/jcjohns/clevr/
+
+Follow instructions here to set up Multid-Sprites: https://github.com/applied-ai-lab/genesis
+
 Run Slot Attention with Project Head
 
 ```
