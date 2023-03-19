@@ -132,4 +132,4 @@ for epoch in range(opt.num_epochs):
         writer.add_image('Reconstructions', images_to_show, epoch)
         plt.figure(figsize=(15,2*test_batch_size))
         plt.imshow(images_to_show.permute(1,2,0))
-        plt.savefig(os.path.join(opt.name, opt.image_dir, 'reconstructions-{}.png'.format(epoch)), bbox_inches='tight')
+        plt.savefig(os.path.join(opt.image_dir, opt.name, 'reconstructions-{}.png'.format(epoch)), bbox_inches='tight')
