@@ -21,10 +21,9 @@ def main(opt):
     resolution = (128, 128)
 
     if opt.dataset == "clevr":
-        train_set = CLEVR(path=opt.dataset_path, resolution=resolution, partition="train")
+        train_set = CLEVR(path=opt.dataset_path, split="train")
     else:
-        #train_set = MultidSprites('train', resolution)
-        raise NotImplementedError
+        train_set = MultiDSprites(path=opt.dataset_path, split='train')
 
     if opt.base:
         model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim).to(device)
@@ -33,12 +32,9 @@ def main(opt):
                                         opt.proj_dim, vis=opt.vis_freq > 0).to(device)
 
     criterion = nn.MSELoss()
-
     params = [{'params': model.parameters()}]
-
     train_dataloader = torch.utils.data.DataLoader(train_set, batch_size=opt.batch_size,
                             shuffle=True, num_workers=opt.num_workers)
-
     optimizer = optim.Adam(params, lr=opt.learning_rate)
 
     wandb.init(project="slot_attn", config=opt)
@@ -166,7 +162,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_workers', default=4, type=int, help='number of workers for loading data')
     parser.add_argument('--num_epochs', default=1000, type=int, help='number of workers for loading data')
     parser.add_argument('--dataset', choices=['clevr', 'multid'], help='dataset to train on')
-    parser.add_argument('--dataset_path', type=str, help='path to dataset')
+    parser.add_argument('--dataset_path', default="./data/CLEVR_v1.0/images", type=str, help='path to dataset')
     parser.add_argument('--proj_dim', default=1024, type=int, help='dimension of the projection space')
     parser.add_argument('--proj_weight', default=1.0, type=float, help='weight given to sum of projection head losses')
     parser.add_argument('--var_weight', default=1, type=float, help='weight given to the variance loss')
