@@ -122,7 +122,7 @@ for epoch in range(opt.num_epochs):
             images_to_show.append(image)
             images_to_show.append(recon_combined)
             
-            for j in range(7):
+            for j in range(opt.num_slots):
                 picture = recon[j] * mask[j] + (1 - mask[j])
                 images_to_show.append(picture)
 
