@@ -1,7 +1,8 @@
 import os
 import argparse
 from dataset import *
-from model import *
+# from model import *
+from torch_model import *
 from tqdm import tqdm
 import time
 import datetime
@@ -22,6 +23,7 @@ parser.add_argument('--name', required=True, type=str, help='name of the experim
 parser.add_argument('--model_dir', default='./checkpoint', type=str, help='where to save models' )
 parser.add_argument('--log_dir', default='./logs', type=str, help='where to save logs' )
 parser.add_argument('--image_dir', default='./images', type=str, help='where to save images' )
+parser.add_argument('--ckpt_path', default=None, type=str, help='path to checkpoint to load')
 parser.add_argument('--seed', default=0, type=int, help='random seed')
 parser.add_argument('--batch_size', default=16, type=int)
 parser.add_argument('--num_slots', default=7, type=int, help='Number of slots in Slot Attention.')
@@ -46,7 +48,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 #train_set = CLEVR('train')
 train_set = MultiDSprites('train')
 model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim).to(device)
-# model.load_state_dict(torch.load('./tmp/model6.ckpt')['model_state_dict'])
+if opt.ckpt_path:
+    model.load_state_dict(torch.load(opt.ckpt_path))
 
 # dataset for visualization
 test_set = MultiDSprites('test')

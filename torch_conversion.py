@@ -28,11 +28,11 @@ batch_size = 1
 num_slots = 7
 num_iterations = 3
 resolution = (128, 128)
-ckpt_path = "/Users/andrewstange/Desktop/CMU/Spring_2023/16-824/Project/obj_disc_weights"               # Path to directory containing TF model checkpoint
-output_ckpt_path = "/Users/andrewstange/Desktop/CMU/Spring_2023/16-824/Project/torch_weight.pt"         # Path to store torch checkpoint
+ckpt_path = "./checkpoint/tf/object_discovery"               # Path to directory containing TF model checkpoint
+output_ckpt_path = "./checkpoint/tf/pytorch/object_discovery.pt"         # Path to store torch checkpoint
 
 # Path to torch implementation, rename model.py to torch_model.py to avoid file name conflicts with TF model.py
-pytorch_impl_path = "/Users/andrewstange/Desktop/CMU/Spring_2023/16-824/Project/slot-attention-pytorch" 
+pytorch_impl_path = "/home/robert1003/Desktop/spring-23/16-824/project" 
 
 
 
