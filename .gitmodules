@@ -1,0 +1,3 @@
+[submodule "genesis"]
+	path = genesis
+	url = git@github.com:applied-ai-lab/genesis.git
