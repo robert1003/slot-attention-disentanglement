@@ -137,7 +137,7 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
         for j in range(opt.num_slots):
             images_to_show.append(rec[j] * msk[j] + (1 - msk[j]))
 
-    images_to_show = torchvision.utils.make_grid(images_to_show, nrow=opt.num_slots+2)
+    images_to_show = torchvision.utils.make_grid(images_to_show, nrow=opt.num_slots+2).clamp_(0,1)
     vis_dict['slot_output'] = wandb.Image(images_to_show)
 
     # Visualize slot feature covariance
