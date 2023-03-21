@@ -129,7 +129,7 @@ for epoch in range(opt.num_epochs):
                 picture = recon[j] * mask[j] + (1 - mask[j])
                 images_to_show.append(picture)
 
-        images_to_show = torchvision.utils.make_grid(images_to_show, nrow=opt.num_slots+2)
+        images_to_show = torchvision.utils.make_grid(images_to_show, nrow=opt.num_slots+2).clamp_(0, 1)
 
         writer.add_image('Reconstructions', images_to_show, epoch)
         plt.figure(figsize=(15,2*test_batch_size))
