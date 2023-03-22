@@ -98,9 +98,17 @@ def main(opt):
             datetime.timedelta(seconds=time.time() - start)))
 
         if not epoch % 10:
-            torch.save({'model_state_dict': model.state_dict()}, opt.model_dir)
+            torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'epoch': epoch,
+            }, opt.model_dir)
 
-    torch.save({'model_state_dict': model.state_dict()}, opt.model_dir)
+    torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'epoch': epoch,
+            }, opt.model_dir)
     wandb.finish()
 
 
