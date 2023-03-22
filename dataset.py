@@ -41,7 +41,9 @@ class CLEVR(Dataset):
         self.root_dir = os.path.join('./data/CLEVR_v1.0/images', split)
         self.files = os.listdir(self.root_dir)
         self.img_transform = transforms.Compose([
-               transforms.ToTensor()])
+               transforms.ToTensor(),
+               transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            ])
 
     def __getitem__(self, index):
         path = self.files[index]
@@ -68,7 +70,9 @@ class MultiDSprites(Dataset):
         self.mask = np.load(os.path.join('./data/multi_dsprites/processed',
             file_split + '_masks_rand4_' + ('unique' if unique else '') + '.npy'))
         self.img_transform = transforms.Compose([
-               transforms.ToTensor()])
+               transforms.ToTensor(),
+               transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            ])
 
     def __getitem__(self, index):
         image = (self.data[index]*255).astype(np.uint8)

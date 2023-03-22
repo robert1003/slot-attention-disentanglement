@@ -109,11 +109,16 @@ for epoch in range(opt.num_epochs):
     if not epoch % 10:
         torch.save({
             'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'epoch': epoch,
             }, os.path.join(opt.model_dir, opt.name, 'checkpoint-{}.ckpt'.format(epoch)))
 
         # visualize the reconstructions
         model.eval()
+        renormalize = lambda x: x / 2. + 0.5 
+        test_images = renormalize(test_images)
         recon_combineds, recons, masks, slots = model(test_images)
+        recon_combineds, recons = renormalize(recon_combineds), renormalize(recons)
 
         images_to_show = []
         for i, image in enumerate(test_images):
