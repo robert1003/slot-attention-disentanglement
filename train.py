@@ -52,11 +52,15 @@ if opt.ckpt_path:
     model.load_state_dict(torch.load(opt.ckpt_path))
 
 # dataset for visualization
+def renormalize(x):
+    return x / 2. + 0.5 
+
 test_set = MultiDSprites('test')
 test_batch_size = 16
 test_loader = torch.utils.data.DataLoader(test_set, batch_size=test_batch_size, shuffle=True, num_workers=0)
 test_images = next(iter(test_loader))['image']
 test_images = test_images.to(device)
+test_images = renormalize(test_images)
 
 criterion = nn.MSELoss()
 
@@ -115,8 +119,6 @@ for epoch in range(opt.num_epochs):
 
         # visualize the reconstructions
         model.eval()
-        renormalize = lambda x: x / 2. + 0.5 
-        test_images = renormalize(test_images)
         recon_combineds, recons, masks, slots = model(test_images)
         recon_combineds, recons = renormalize(recon_combineds), renormalize(recons)
 
