@@ -79,8 +79,11 @@ def visualize(vis_dict, model, batch):
     """Add visualizations to the dictionary to be logged with W&B"""
     # Visualize image, reconstruction, and slots for subset of images
     preds = model(batch["image"], training=False)
-    image = batch["image"]
+    renormalize = lambda x: (x + 1.) / 2.
+    image = renormalize(batch["image"])
     recon_combined, recons, masks, slots = preds
+    recons = renormalize(recons)
+    recon_combined = renormalize(recon_combined)
 
     images_to_show = []
     for i, img in enumerate(image[:16]):
