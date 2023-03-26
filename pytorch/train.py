@@ -42,7 +42,7 @@ def main(opt):
                             shuffle=True, num_workers=opt.num_workers)
     optimizer = optim.Adam(params, lr=opt.learning_rate)
 
-    wandb.init(project="slot_attn", config=opt)
+    wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
     if opt.vis_freq > 0:
         # Log gradient every opt.vis_freq epoch
         wandb.watch(model, log='gradients', log_freq=opt.vis_freq * len(train_dataloader))
