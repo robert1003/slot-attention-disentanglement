@@ -212,10 +212,10 @@ class SlotAttentionAutoEncoder(nn.Module):
 
 
 class SlotAttentionProjection(SlotAttentionAutoEncoder):
-    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, variance_target=1, vis=False):
+    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis=False):
         super().__init__(resolution, num_slots, num_iterations, hid_dim)
 
-        self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, variance_target, vis=vis)
+        self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, std_target, vis=vis)
 
     def forward(self, image):
         recon_combined, recons, masks, slots = super().forward(image)
@@ -230,11 +230,11 @@ class SlotAttentionProjection(SlotAttentionAutoEncoder):
 
 
 class ProjectionHead(nn.Module):
-    def __init__(self, num_slots, hid_dim, projection_dim, variance_target, epsilon=0.0001, vis=False) -> None:
+    def __init__(self, num_slots, hid_dim, projection_dim, std_target, epsilon=0.0001, vis=False) -> None:
         super().__init__()
 
         self.proj_dim = projection_dim
-        self.gamma = variance_target
+        self.gamma = std_target
         self.eps = epsilon      # small constant for numerical stability
         self.vis = vis
 
