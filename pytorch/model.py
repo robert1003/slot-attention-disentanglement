@@ -275,8 +275,8 @@ class ProjectionHead(nn.Module):
         out = {"std_loss": std_loss.detach().item(), "cov_loss": cov_loss.detach().item()}
 
         if self.vis:
-            out['cov_mx'] = cov.detach()
-            out['std_vec'] = std.detach()
+            out['cov_mx'] = cov.detach().cpu()
+            out['std_vec'] = std.detach().cpu()
 
         return out
     
