@@ -126,7 +126,7 @@ def unstack_and_split(x, batch_size, num_channels=3):
 class SlotAttentionAutoEncoder(layers.Layer):
   """Slot Attention-based auto-encoder for object discovery."""
 
-  def __init__(self, resolution, num_slots, num_iterations):
+  def __init__(self, resolution, num_slots, num_iterations, hidden_size):
     """Builds the Slot Attention-based auto-encoder.
 
     Args:
@@ -140,41 +140,41 @@ class SlotAttentionAutoEncoder(layers.Layer):
     self.num_iterations = num_iterations
 
     self.encoder_cnn = tf.keras.Sequential([
-        layers.Conv2D(64, kernel_size=5, padding="SAME", activation="relu"),
-        layers.Conv2D(64, kernel_size=5, padding="SAME", activation="relu"),
-        layers.Conv2D(64, kernel_size=5, padding="SAME", activation="relu"),
-        layers.Conv2D(64, kernel_size=5, padding="SAME", activation="relu")
+        layers.Conv2D(hidden_size, kernel_size=5, padding="SAME", activation="relu"),
+        layers.Conv2D(hidden_size, kernel_size=5, padding="SAME", activation="relu"),
+        layers.Conv2D(hidden_size, kernel_size=5, padding="SAME", activation="relu"),
+        layers.Conv2D(hidden_size, kernel_size=5, padding="SAME", activation="relu")
     ], name="encoder_cnn")
 
     self.decoder_initial_size = (8, 8)
     self.decoder_cnn = tf.keras.Sequential([
         layers.Conv2DTranspose(
-            64, 5, strides=(2, 2), padding="SAME", activation="relu"),
+            hidden_size, 5, strides=(2, 2), padding="SAME", activation="relu"),
         layers.Conv2DTranspose(
-            64, 5, strides=(2, 2), padding="SAME", activation="relu"),
+            hidden_size, 5, strides=(2, 2), padding="SAME", activation="relu"),
         layers.Conv2DTranspose(
-            64, 5, strides=(2, 2), padding="SAME", activation="relu"),
+            hidden_size, 5, strides=(2, 2), padding="SAME", activation="relu"),
         layers.Conv2DTranspose(
-            64, 5, strides=(2, 2), padding="SAME", activation="relu"),
+            hidden_size, 5, strides=(2, 2), padding="SAME", activation="relu"),
         layers.Conv2DTranspose(
-            64, 5, strides=(1, 1), padding="SAME", activation="relu"),
+            hidden_size, 5, strides=(1, 1), padding="SAME", activation="relu"),
         layers.Conv2DTranspose(
             4, 3, strides=(1, 1), padding="SAME", activation=None)
     ], name="decoder_cnn")
 
-    self.encoder_pos = SoftPositionEmbed(64, self.resolution)
-    self.decoder_pos = SoftPositionEmbed(64, self.decoder_initial_size)
+    self.encoder_pos = SoftPositionEmbed(hidden_size, self.resolution)
+    self.decoder_pos = SoftPositionEmbed(hidden_size, self.decoder_initial_size)
 
     self.layer_norm = layers.LayerNormalization()
     self.mlp = tf.keras.Sequential([
-        layers.Dense(64, activation="relu"),
-        layers.Dense(64)
+        layers.Dense(hidden_size, activation="relu"),
+        layers.Dense(hidden_size)
     ], name="feedforward")
 
     self.slot_attention = SlotAttention(
         num_iterations=self.num_iterations,
         num_slots=self.num_slots,
-        slot_size=64,
+        slot_size=hidden_size,
         mlp_hidden_size=128)
 
   def call(self, image):
@@ -306,7 +306,7 @@ class SoftPositionEmbed(layers.Layer):
 
 
 def build_model(resolution, batch_size, num_slots, num_iterations,
-                num_channels=3, model_type="object_discovery"):
+                hidden_size, num_channels=3, model_type="object_discovery"):
   """Build keras model."""
   if model_type == "object_discovery":
     model_def = SlotAttentionAutoEncoder
@@ -316,7 +316,7 @@ def build_model(resolution, batch_size, num_slots, num_iterations,
     raise ValueError("Invalid name for model type.")
 
   image = tf.keras.Input(list(resolution) + [num_channels], batch_size)
-  outputs = model_def(resolution, num_slots, num_iterations)(image)
+  outputs = model_def(resolution, num_slots, num_iterations, hidden_size=hidden_size)(image)
   model = tf.keras.Model(inputs=image, outputs=outputs)
   return model
 

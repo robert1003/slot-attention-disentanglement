@@ -22,9 +22,19 @@ from absl import flags
 from absl import logging
 import tensorflow as tf
 
-import slot_attention.data as data_utils
-import slot_attention.model as model_utils
-import slot_attention.utils as utils
+import sys
+sys.path.insert(0, '../')
+import data as data_utils
+import model as model_utils
+import utils as utils
+
+# for logging
+import torchvision
+import torch
+import wandb
+import matplotlib
+matplotlib.use('Agg')       # non-interactive backend for matplotlib
+import matplotlib.pyplot as plt
 
 
 FLAGS = flags.FLAGS
@@ -42,6 +52,9 @@ flags.DEFINE_float("decay_rate", 0.5, "Rate for the learning rate decay.")
 flags.DEFINE_integer("decay_steps", 100000,
                      "Number of steps for the learning rate decay.")
 
+flags.DEFINE_integer("hidden_size", 64, "Hidden size for the model.")
+flags.DEFINE_string("dataset", "clevr", "Dataset to use.")
+flags.DEFINE_string("name", None, "Name of the experiment.")
 
 # We use `tf.function` compilation to speed up execution. For debugging,
 # consider commenting out the `@tf.function` decorator.
@@ -62,6 +75,34 @@ def train_step(batch, model, optimizer):
 
   return loss_value
 
+def visualize(vis_dict, model, batch):
+    """Add visualizations to the dictionary to be logged with W&B"""
+    # Visualize image, reconstruction, and slots for subset of images
+    preds = model(batch["image"], training=False)
+    renormalize = lambda x: (x + 1.) / 2.
+    image = renormalize(batch["image"])
+    recon_combined, recons, masks, slots = preds
+    recons = renormalize(recons)
+    recon_combined = renormalize(recon_combined)
+
+    images_to_show = []
+    for i, img in enumerate(image[:16]):
+        img = img.cpu()
+        rec = recons[i].cpu()
+        msk = masks[i].cpu()
+
+        images_to_show.append(img)
+        images_to_show.append(recon_combined[i].cpu())
+
+        for j in range(FLAGS.num_slots):
+            images_to_show.append(rec[j] * msk[j] + (1 - msk[j]))
+
+    to_torch_tensor = lambda x: torch.from_numpy(x.numpy()).permute(2, 0, 1)
+    images_to_show = list(map(to_torch_tensor, images_to_show))
+    images_to_show = torchvision.utils.make_grid(images_to_show, nrow=FLAGS.num_slots+2, ).clamp_(0,1)
+    vis_dict['slot_output'] = wandb.Image(images_to_show)
+
+    return vis_dict
 
 def main(argv):
   del argv
@@ -77,15 +118,25 @@ def main(argv):
   tf.random.set_seed(FLAGS.seed)
   resolution = (128, 128)
 
+  hidden_size = FLAGS.hidden_size
+  dataset = FLAGS.dataset
+  name = FLAGS.name
+
+  wandb.init(project="slot_attn", group="tf", name=name, config=FLAGS.flag_values_dict())
+
   # Build dataset iterators, optimizers and model.
-  data_iterator = data_utils.build_clevr_iterator(
-      batch_size, split="train", resolution=resolution, shuffle=True,
-      max_n_objects=6, get_properties=False, apply_crop=True)
+  if dataset == 'clevr':
+    data_iterator = data_utils.build_clevr_iterator(
+        batch_size, split="train", resolution=resolution, shuffle=True,
+        max_n_objects=6, get_properties=False, apply_crop=True)
+  elif dataset == 'multidsprites':
+    data_iterator = data_utils.build_multidsprites_iterator(
+        batch_size, split="train", resolution=resolution, shuffle=True)
 
   optimizer = tf.keras.optimizers.Adam(base_learning_rate, epsilon=1e-08)
 
   model = model_utils.build_model(resolution, batch_size, num_slots,
-                                  num_iterations, model_type="object_discovery")
+                                  num_iterations, hidden_size=hidden_size, model_type="object_discovery")
 
   # Prepare checkpoint manager.
   global_step = tf.Variable(
@@ -114,7 +165,11 @@ def main(argv):
         tf.cast(global_step, tf.float32) / tf.cast(decay_steps, tf.float32)))
     optimizer.lr = learning_rate.numpy()
 
+    wandb.log({"lr": learning_rate.numpy()}, step=global_step.numpy())
+
     loss_value = train_step(batch, model, optimizer)
+
+    wandb.log({"loss": loss_value.numpy()}, step=global_step.numpy())
 
     # Update the global step. We update it before logging the loss and saving
     # the model so that the last checkpoint is saved at the last iteration.
@@ -126,6 +181,11 @@ def main(argv):
                    global_step.numpy(), loss_value,
                    datetime.timedelta(seconds=time.time() - start))
 
+      # Visualize
+      vis_dict = {}
+      vis_dict = visualize(vis_dict, model, batch)
+      wandb.log(vis_dict, step=global_step.numpy())
+
     # We save the checkpoints every 1000 iterations.
     if not global_step  % 1000:
       # Save the checkpoint of the model.
@@ -134,4 +194,9 @@ def main(argv):
 
 
 if __name__ == "__main__":
+  # prevent tf from occupying all gpu memory
+  gpus = tf.config.experimental.list_physical_devices('GPU')
+  for gpu in gpus:
+      tf.config.experimental.set_memory_growth(gpu, True)
+
   app.run(main)

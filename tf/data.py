@@ -121,3 +121,52 @@ def build_clevr_iterator(batch_size, split, **kwargs):
   ds = ds.batch(batch_size, drop_remainder=True)
   return iter(ds)
 
+def preprocess_multidsprites(image, resolution):
+  """Preprocess Multi-dSprites."""
+  image = tf.cast(image, dtype=tf.float32) * 255.0
+  image = ((image / 255.0) - 0.5) * 2.0  # Rescale to [-1, 1].
+
+  image = tf.image.resize(
+      image, resolution, method=tf.image.ResizeMethod.BILINEAR)
+  image = tf.clip_by_value(image, -1., 1.)
+
+  features = {"image": image}
+
+  return features
+
+from torch.utils.data import Dataset, DataLoader
+import numpy as np
+import os
+
+def build_multidsprites(split, resolution=(128, 128), shuffle=False, unique=True,
+        path='./data/multi_dsprites/processed'):
+  assert split in ['train', 'val', 'test'], 'split must be train, val or test'
+
+  file_split = {'train': 'training', 'val': 'validation', 'test': 'test'}[split]
+  data = np.load(os.path.join(path,
+      file_split + '_images_rand4_' + ('unique' if unique else '') + '.npy'))
+  ds = tf.data.Dataset.from_tensor_slices(data)
+
+  def _preprocess_fn(x, resolution):
+    return preprocess_multidsprites(x, resolution)
+  ds = ds.map(lambda x: _preprocess_fn(x, resolution))
+  return ds
+
+def build_multidsprites_iterator(batch_size, split, shuffle=False, **kwargs):
+  ds = build_multidsprites(split=split, **kwargs)
+  ds = ds.repeat(-1)
+  ds = ds.batch(batch_size, drop_remainder=True)
+  return iter(ds)
+
+if __name__ == "__main__":
+  import matplotlib.pyplot as plt
+  gpus = tf.config.experimental.list_physical_devices('GPU')
+  for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
+  ds = build_multidsprites_iterator(32, 'train')
+  for i in range(10):
+    batch = next(ds)
+    print(batch['image'].shape)
+    img = batch['image'][0].numpy()
+    plt.imshow((img + 1) / 2)
+    plt.show()
