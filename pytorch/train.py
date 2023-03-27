@@ -39,7 +39,7 @@ def main(opt):
     criterion = nn.MSELoss()
     params = [{'params': model.parameters()}]
     train_dataloader = torch.utils.data.DataLoader(train_set, batch_size=opt.batch_size,
-                            shuffle=True, num_workers=opt.num_workers)
+                            shuffle=True, num_workers=opt.num_workers, pin_memory=True)
     optimizer = optim.Adam(params, lr=opt.learning_rate)
 
     wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
