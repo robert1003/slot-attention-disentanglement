@@ -45,19 +45,19 @@ def main(opt):
     wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
     if opt.vis_freq > 0:
         # Log gradient every opt.vis_freq epoch
-        wandb.watch(model, log='gradients', log_freq=opt.vis_freq * len(train_dataloader))
+        wandb.watch(model, log='gradients', log_freq=opt.vis_freq)
 
     start = time.time()
     i = 0
-    for epoch in range(opt.num_epochs):
+    total_loss = 0
+    pbar = tqdm(total=opt.num_train_steps)
+    while i < opt.num_train_steps:
         model.train()
 
-        total_loss = 0
-
-        vis_epoch = opt.vis_freq > 0 and epoch % opt.vis_freq == 0 
         dataloader_len = len(train_dataloader)
-        for sample in tqdm(train_dataloader):
+        for sample in train_dataloader:
             i += 1
+            vis_step = opt.vis_freq > 0 and i % opt.vis_freq == 0
             vis_dict = {}
             if i < opt.warmup_steps:
                 learning_rate = opt.learning_rate * (i / opt.warmup_steps)
@@ -82,8 +82,7 @@ def main(opt):
                 vis_dict['cov_loss'] = proj_loss_dict['cov_loss'].item()
 
             vis_dict['loss'] = loss
-            if vis_epoch and i % dataloader_len == (dataloader_len-1):    
-                # Visualize on last step of the epoch
+            if vis_step:
                 vis_dict = visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_loss_dict)
             wandb.log(vis_dict, step=i)
             
@@ -94,22 +93,30 @@ def main(opt):
             loss.backward()
             optimizer.step()
 
-        total_loss /= len(train_dataloader)
+            if vis_step:
+                total_loss /= opt.vis_freq
 
-        print ("Epoch: {}, Loss: {}, Time: {}".format(epoch, total_loss,
-            datetime.timedelta(seconds=time.time() - start)))
+                print ("Steps: {}, Loss: {}, Time: {}".format(i, total_loss,
+                    datetime.timedelta(seconds=time.time() - start)))
 
-        if not epoch % 10:
-            torch.save({
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'epoch': epoch,
-            }, opt.model_dir)
+                total_loss = 0
 
+            if i % opt.store_freq == 0:
+                torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'step': i,
+                }, opt.model_dir)
+
+            if i >= opt.num_train_steps:
+                break
+            pbar.update(1)
+
+    pbar.close()
     torch.save({
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
-            'epoch': epoch,
+            'step': i,
             }, opt.model_dir)
     wandb.finish()
 
@@ -174,8 +181,8 @@ if __name__ == "__main__":
     parser.add_argument('--warmup_steps', default=10000, type=int, help='Number of warmup steps for the learning rate.')
     parser.add_argument('--decay_rate', default=0.5, type=float, help='Rate for the learning rate decay.')
     parser.add_argument('--decay_steps', default=100000, type=int, help='Number of steps for the learning rate decay.')
+    parser.add_argument('--num_train_steps', default=500000, type=int, help='Number of training steps.')
     parser.add_argument('--num_workers', default=4, type=int, help='number of workers for loading data')
-    parser.add_argument('--num_epochs', default=1000, type=int, help='number of workers for loading data')
     parser.add_argument('--dataset', choices=['clevr', 'multid'], help='dataset to train on')
     parser.add_argument('--dataset_path', default="./data/CLEVR_v1.0/images", type=str, help='path to dataset')
     parser.add_argument('--proj_dim', default=1024, type=int, help='dimension of the projection space')
@@ -183,7 +190,8 @@ if __name__ == "__main__":
     parser.add_argument('--var_weight', default=1, type=float, help='weight given to the variance loss')
     parser.add_argument('--cov_weight', default=25, type=float, help='weight given to the covariance loss')
     parser.add_argument('--base', action='store_true', help='run base Slot Attention model, no projection head')
-    parser.add_argument('--vis_freq', default=10, type=int, help='frequency at which to generate visualization (in epochs)')
+    parser.add_argument('--vis_freq', default=1000, type=int, help='frequency at which to generate visualization (in steps)')
+    parser.add_argument('--store_freq', default=10000, type=int, help='frequency at which to save model (in steps)')
 
     main(parser.parse_args())
 
