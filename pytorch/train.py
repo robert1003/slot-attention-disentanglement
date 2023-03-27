@@ -75,9 +75,11 @@ def main(opt):
             else: 
                 recon_combined, recons, masks, slots, proj_loss_dict = model(image)
                 proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + opt.cov_weight * proj_loss_dict["cov_loss"]
-                loss = criterion(recon_combined, image) + opt.proj_weight * proj_loss
-                vis_dict['std_loss'] = proj_loss_dict['std_loss']
-                vis_dict['cov_loss'] = proj_loss_dict['cov_loss']
+                recon_loss = criterion(recon_combined, image)
+                loss = recon_loss + opt.proj_weight * proj_loss
+                vis_dict['recon_loss'] = recon_loss.item()
+                vis_dict['std_loss'] = proj_loss_dict['std_loss'].item()
+                vis_dict['cov_loss'] = proj_loss_dict['cov_loss'].item()
 
             vis_dict['loss'] = loss
             if vis_epoch and i % dataloader_len == (dataloader_len-1):    
