@@ -272,7 +272,7 @@ class ProjectionHead(nn.Module):
         std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
         std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))       
 
-        out = {"std_loss": std_loss.detach().item(), "cov_loss": cov_loss.detach().item()}
+        out = {"std_loss": std_loss, "cov_loss": cov_loss}
 
         if self.vis:
             out['cov_mx'] = cov.detach().cpu()
