@@ -151,7 +151,7 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
     vis_dict['slot_output'] = wandb.Image(images_to_show)
 
     # Visualize slot feature covariance
-    feature_cov = torch.cov(slots.detach().reshape((-1,) + slots.shape[2:]).T)
+    feature_cov = torch.cov(slots.detach().reshape((-1,) + slots.shape[2:]).T).cpu()
     plt.figure(figsize=(10,10))
     plt.imshow(feature_cov, cmap='Blues')
     plt.colorbar()
