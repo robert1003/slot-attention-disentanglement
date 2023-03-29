@@ -192,7 +192,7 @@ if __name__ == "__main__":
     parser.add_argument('--base', action='store_true', help='run base Slot Attention model, no projection head')
     parser.add_argument('--vis_freq', default=1000, type=int, help='frequency at which to generate visualization (in steps)')
     parser.add_argument('--store_freq', default=10000, type=int, help='frequency at which to save model (in steps)')
-    parser.add_argument('--std_target', default=0.1, type=int, help='target std. deviation for each projection space dimension')
+    parser.add_argument('--std_target', default=1.0, type=float, help='target std. deviation for each projection space dimension')
 
     main(parser.parse_args())
 
