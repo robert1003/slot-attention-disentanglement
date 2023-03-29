@@ -37,7 +37,8 @@ class SlotAttention(nn.Module):
         
         mu = self.slots_mu.expand(b, n_s, -1)
         sigma = self.slots_sigma.expand(b, n_s, -1)
-        slots = torch.normal(mu, sigma)
+        # slots = torch.normal(mu, sigma)
+        slots = mu + torch.normal(mean=0, std=1, size=sigma.shape) * sigma
 
         inputs = self.norm_input(inputs)        
         k, v = self.to_k(inputs), self.to_v(inputs)
