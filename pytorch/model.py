@@ -218,12 +218,12 @@ class SlotAttentionProjection(SlotAttentionAutoEncoder):
 
         self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, std_target, vis=vis)
 
-    def forward(self, image):
+    def forward(self, image, vis_step):
         recon_combined, recons, masks, slots = super().forward(image)
 
         if self.training:
             # Only run projection head when training
-            return recon_combined, recons, masks, slots, self.projection_head(slots)
+            return recon_combined, recons, masks, slots, self.projection_head(slots, vis_step)
 
         return recon_combined, recons, masks, slots, None
 
@@ -251,19 +251,24 @@ class ProjectionHead(nn.Module):
         )
 
 
-    def forward(self, x):
+    def forward(self, x, vis_step):
         """
         Calculate projected slot-feature variance and covariance over all the slots for a single batch at once
-        TODO write over versions of covariance + batching described in proposal
+        TODO write alternative versions of covariance + batching described in proposal
         """
         # Given matrix of slot representations, return loss
-        proj = self.projector(x)
+        projection = self.projector(x)
 
         # Collect all slots over the entire batch
-        proj = proj.reshape((-1,) + proj.shape[2:])
+        proj = projection.reshape((-1,) + projection.shape[2:])
         
         # Our "batch size" here is: (batch size) x (# slots)
         proj_batch_sz = x.shape[0]
+
+        # Zero-center each projection dimension (subtract per-dimension mean)
+        # Should not affect the variance/covariance calculations below, but may be important for numerical stability?
+        proj_mean = torch.mean(proj, dim=0)
+        proj = proj - proj_mean
 
         # Calculate covariance loss over projected slot features
         cov = (proj.T @ proj) / (proj_batch_sz - 1)
@@ -273,11 +278,25 @@ class ProjectionHead(nn.Module):
         std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
         std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))       
 
-        out = {"std_loss": std_loss, "cov_loss": cov_loss}
+        out = {"std_loss": std_loss, "cov_loss": cov_loss, 
+               'proj_mean': torch.mean(proj_mean).item(), 'proj_batch_sz': proj_batch_sz}
 
         if self.vis:
             out['cov_mx'] = cov.detach().cpu()
             out['std_vec'] = std.detach().cpu()
+
+        if vis_step:
+            # Take vector norm of the representation and projection for each slot in the batch
+            proj_vec_norm = torch.linalg.vector_norm(projection, dim=2)
+            proj_input_norm = torch.linalg.vector_norm(x, dim=2)
+
+            # Broad-brush view of projection head expressive power, take mean of projection/input norms 
+            out['proj_out_norm'] = torch.mean(proj_vec_norm).item()
+            out['proj_input_norm'] = torch.mean(proj_input_norm).item()
+
+            # Take difference of projection and input norms for each slot, then take the mean of this difference
+            # Finer-grained POV of how individual vectors are stretched by projection head
+            out['proj_diff_norm'] = torch.mean(proj_vec_norm - proj_input_norm).item()
 
         return out
     
