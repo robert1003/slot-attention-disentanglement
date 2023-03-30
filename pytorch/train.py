@@ -73,13 +73,29 @@ def main(opt):
                 recon_combined, recons, masks, slots = model(image)
                 loss = criterion(recon_combined, image)
             else: 
-                recon_combined, recons, masks, slots, proj_loss_dict = model(image)
+                recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
                 proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + opt.cov_weight * proj_loss_dict["cov_loss"]
                 recon_loss = criterion(recon_combined, image)
-                loss = recon_loss + opt.proj_weight * proj_loss
+                proj_loss *= opt.proj_weight
+                loss = recon_loss + proj_loss
                 vis_dict['recon_loss'] = recon_loss.item()
                 vis_dict['std_loss'] = proj_loss_dict['std_loss'].item()
                 vis_dict['cov_loss'] = proj_loss_dict['cov_loss'].item()
+
+                # Basic visualization of distribution of slot initializations in Slot Attn. module
+                vis_dict['slot_sample_mean'] = torch.mean(model.slot_attention.slots_mu).item()
+                vis_dict['slot_sample_std'] = torch.mean(model.slot_attention.slots_sigma).item()
+
+                # Visualize the mean of the per-dimension means of slot projections
+                vis_dict['avg_proj_dim_mean'] = proj_loss_dict['proj_mean']
+
+                # Visualize influence of reconstruction loss vs. projection head losses
+                # Positive if reconstruction loss dominates loss, negative if projection losses dominate
+                vis_dict['recon_proj_loss_diff'] = recon_loss - proj_loss
+
+                # Visualize projection space batch size (sanity check that this is constant, 
+                # otherwise may result in instabilities)
+                vis_dict['proj_batch_sz'] = proj_loss_dict['proj_batch_sz']
 
             vis_dict['loss'] = loss
             if vis_step:
@@ -164,6 +180,12 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
     plt.colorbar()
     vis_dict['slot_feature_cov'] = wandb.Image(plt)
     plt.close()
+
+    # Visualize projection head norms, calculated in ProjectionHead.forward
+    vis_dict['proj_diff_norm'] = proj_loss_dict['proj_diff_norm']
+    vis_dict['proj_out_norm'] = proj_loss_dict['proj_out_norm']
+    vis_dict['proj_input_norm'] = proj_loss_dict['proj_input_norm']
+
     return vis_dict
 
 
