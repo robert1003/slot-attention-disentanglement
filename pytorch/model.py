@@ -191,7 +191,7 @@ class SlotAttentionAutoEncoder(nn.Module):
         # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
         slots = slots_rep.reshape((-1, slots_rep.shape[-1])).unsqueeze(1).unsqueeze(2)
         slots = slots.repeat((1, 8, 8, 1))
-
+        
         # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
         x = self.decoder_cnn(slots)
         # `x` has shape: [batch_size*num_slots, width, height, num_channels+1].
