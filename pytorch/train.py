@@ -100,7 +100,10 @@ def main(opt):
 
             vis_dict['loss'] = loss
             if vis_step:
-                vis_dict = visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_loss_dict)
+                if not opt.base:
+                    vis_dict = visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_loss_dict)
+                else:
+                    vis_dict = visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, None)
             wandb.log(vis_dict, step=i)
             
             total_loss += loss.item()
@@ -182,10 +185,11 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
     vis_dict['slot_feature_cov'] = wandb.Image(plt)
     plt.close()
 
-    # Visualize projection head norms, calculated in ProjectionHead.forward
-    vis_dict['proj_diff_norm'] = proj_loss_dict['proj_diff_norm']
-    vis_dict['proj_out_norm'] = proj_loss_dict['proj_out_norm']
-    vis_dict['proj_input_norm'] = proj_loss_dict['proj_input_norm']
+    if not opt.base:
+        # Visualize projection head norms, calculated in ProjectionHead.forward
+        vis_dict['proj_diff_norm'] = proj_loss_dict['proj_diff_norm']
+        vis_dict['proj_out_norm'] = proj_loss_dict['proj_out_norm']
+        vis_dict['proj_input_norm'] = proj_loss_dict['proj_input_norm']
 
     return vis_dict
 
