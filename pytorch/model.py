@@ -213,10 +213,10 @@ class SlotAttentionAutoEncoder(nn.Module):
 
 
 class SlotAttentionProjection(SlotAttentionAutoEncoder):
-    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis=False):
+    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis=False, cov_div_square=False):
         super().__init__(resolution, num_slots, num_iterations, hid_dim)
 
-        self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, std_target, vis=vis)
+        self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, std_target, vis=vis, cov_div_square=cov_div_square)
 
     def forward(self, image, vis_step):
         recon_combined, recons, masks, slots = super().forward(image)
@@ -231,13 +231,18 @@ class SlotAttentionProjection(SlotAttentionAutoEncoder):
 
 
 class ProjectionHead(nn.Module):
-    def __init__(self, num_slots, hid_dim, projection_dim, std_target, epsilon=0.0001, vis=False) -> None:
+    def __init__(self, num_slots, hid_dim, projection_dim, std_target, epsilon=0.0001, vis=False, cov_div_square=False) -> None:
         super().__init__()
 
         self.proj_dim = projection_dim
         self.gamma = std_target
         self.eps = epsilon      # small constant for numerical stability
         self.vis = vis
+
+        if cov_div_square:
+            self.cov_div = self.proj_dim**2
+        else:
+            self.cov_div = self.proj_dim
 
         # VICReg paper, Section 4.2. Two FC layers with non-linearities and a final linear layer
         self.projector = nn.Sequential(
@@ -272,7 +277,7 @@ class ProjectionHead(nn.Module):
 
         # Calculate covariance loss over projected slot features
         cov = (proj.T @ proj) / (proj_batch_sz - 1)
-        cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.proj_dim ** 2)
+        cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.cov_div)
 
         # Calculate variance loss over projected slot features
         std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
