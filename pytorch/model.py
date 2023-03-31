@@ -272,7 +272,7 @@ class ProjectionHead(nn.Module):
 
         # Calculate covariance loss over projected slot features
         cov = (proj.T @ proj) / (proj_batch_sz - 1)
-        cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.proj_dim)
+        cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.proj_dim ** 2)
 
         # Calculate variance loss over projected slot features
         std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
