@@ -43,15 +43,29 @@ def main(opt):
                             shuffle=True, num_workers=opt.num_workers, pin_memory=True)
     optimizer = optim.Adam(params, lr=opt.learning_rate)
 
-    wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
+    start = time.time()
+
+    if os.path.isfile(opt.model_dir):
+        print("Loading model from {}".format(opt.model_dir))
+        ckpt = torch.load(opt.model_dir)
+        model.load_state_dict(ckpt['model_state_dict'])
+        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        i = ckpt['step']
+        total_loss = ckpt['total_loss']
+        wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt, id=ckpt['wandb_run_id'], resume="must")
+    else:
+        wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
+        i = 0
+        total_loss = 0
+
+    run_id, run_name = wandb.run.id, wandb.run.name
     if opt.vis_freq > 0:
         # Log gradient every opt.vis_freq epoch
         wandb.watch(model, log='gradients', log_freq=opt.vis_freq)
 
-    start = time.time()
-    i = 0
-    total_loss = 0
+
     pbar = tqdm(total=opt.num_train_steps)
+    pbar.update(i)
     while i < opt.num_train_steps:
         model.train()
 
@@ -126,6 +140,8 @@ def main(opt):
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'step': i,
+                'total_loss': total_loss,
+                'wandb_run_id': run_id,
                 }, opt.model_dir)
 
             if i >= opt.num_train_steps:
@@ -137,6 +153,8 @@ def main(opt):
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'step': i,
+            'total_loss': total_loss,
+            'wandb_run_id': run_id,
             }, opt.model_dir)
     wandb.finish()
 
