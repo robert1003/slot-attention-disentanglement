@@ -186,7 +186,7 @@ class SlotAttentionAutoEncoder(nn.Module):
 
         # Slot Attention module.
         slots_rep = self.slot_attention(x)
-        # `slots` has shape: [batch_size, num_slots, slot_size].
+        # `slots_rep` has shape: [batch_size, num_slots, slot_size].
 
         # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
         slots = slots_rep.reshape((-1, slots_rep.shape[-1])).unsqueeze(1).unsqueeze(2)
@@ -220,10 +220,15 @@ class SlotAttentionProjection(SlotAttentionAutoEncoder):
 
     def forward(self, image, vis_step):
         recon_combined, recons, masks, slots = super().forward(image)
+        # `recon_combined` has shape: [batch_size, width, height, num_channels].
+        # `recons` has shape: [batch_size, num_slots, width, height, num_channels].
+        # `masks` has shape: [batch_size, num_slots, width, height, 1].
+        # `slots` has shape: [batch_size, num_slots, slot_size].
 
         if self.training:
             # Only run projection head when training
             return recon_combined, recons, masks, slots, self.projection_head(slots, vis_step)
+            # `self.projection_head` returns a dictionary of losses and logged values.
 
         return recon_combined, recons, masks, slots, None
 
@@ -258,9 +263,11 @@ class ProjectionHead(nn.Module):
         """
         # Given matrix of slot representations, return loss
         projection = self.projector(x)
+        # `projection` has shape: [batch_size, num_slots, proj_dim].
 
         # Collect all slots over the entire batch
         proj = projection.reshape((-1,) + projection.shape[2:])
+        # `proj` has shape: [batch_size*num_slots, proj_dim].
         
         # Our "batch size" here is: (batch size) x (# slots)
         proj_batch_sz = x.shape[0]
@@ -269,14 +276,18 @@ class ProjectionHead(nn.Module):
         # Should not affect the variance/covariance calculations below, but may be important for numerical stability?
         proj_mean = torch.mean(proj, dim=0)
         proj = proj - proj_mean
+        # `proj_mean` has shape: [proj_dim].
+        # `proj` has shape: [batch_size*num_slots, proj_dim].
 
         # Calculate covariance loss over projected slot features
         cov = (proj.T @ proj) / (proj_batch_sz - 1)
         cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.proj_dim)
+        # `cov` has shape: [proj_dim, proj_dim].
 
         # Calculate variance loss over projected slot features
         std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
-        std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))       
+        std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
+        # `std` has shape: [proj_dim].
 
         out = {"std_loss": std_loss, "cov_loss": cov_loss, 
                'proj_mean': torch.mean(proj_mean).item(), 'proj_batch_sz': proj_batch_sz}
@@ -289,6 +300,8 @@ class ProjectionHead(nn.Module):
             # Take vector norm of the representation and projection for each slot in the batch
             proj_vec_norm = torch.linalg.vector_norm(projection, dim=2)
             proj_input_norm = torch.linalg.vector_norm(x, dim=2)
+            # `proj_vec_norm` has shape: [batch_size, num_slots].
+            # `proj_input_norm` has shape: [batch_size, num_slots].
 
             # Broad-brush view of projection head expressive power, take mean of projection/input norms 
             out['proj_out_norm'] = torch.mean(proj_vec_norm).item()
