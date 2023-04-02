@@ -114,7 +114,7 @@ class Encoder(nn.Module):
         return x
 
 class Decoder(nn.Module):
-    def __init__(self, hid_dim, resolution):
+    def __init__(self, hid_dim, resolution, decoder_init_size=(8, 8)):
         super().__init__()
         self.conv1 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(2, 2), padding=2, output_padding=1).to(device)
         self.conv2 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(2, 2), padding=2, output_padding=1).to(device)
@@ -122,7 +122,7 @@ class Decoder(nn.Module):
         self.conv4 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(2, 2), padding=2, output_padding=1).to(device)
         self.conv5 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(1, 1), padding=2).to(device)
         self.conv6 = nn.ConvTranspose2d(hid_dim, 4, 3, stride=(1, 1), padding=1)
-        self.decoder_initial_size = (8, 8)
+        self.decoder_initial_size = decoder_init_size
         self.decoder_pos = SoftPositionEmbed(hid_dim, self.decoder_initial_size)
         self.resolution = resolution
 
@@ -324,6 +324,68 @@ class ProjectionHead(nn.Module):
         assert n == m
         return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
+
+
+
+
+
+class DINOSAURProjection(nn.Module):
+    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis=False, cov_div_square=False):
+        super().__init__()
+
+        # TODO: this reconstructs (224, 224) but we can see if default (128, 128) gives better results
+        self.width_init = self.height_init = 16
+
+        self.hid_dim = hid_dim
+        self.resolution = resolution
+        self.num_slots = num_slots
+        self.num_iterations = num_iterations
+
+        self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
+
+        self.slot_attention = SlotAttention(
+            num_slots=self.num_slots,
+            dim=hid_dim,
+            iters = self.num_iterations,
+            eps = 1e-8, 
+            hidden_dim = 128)  
+        
+        self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, std_target, vis=vis, cov_div_square=cov_div_square)
+
+    def forward(self, x, image, vis_step):
+        # `image` has shape: [batch_size, num_channels, width, height].
+        # `x` has shape: [batch_size, width*height, input_size].
+
+        # Slot Attention module.
+        slots_rep = self.slot_attention(x)
+        # `slots_rep` has shape: [batch_size, num_slots, slot_size].
+
+        # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
+        slots = slots_rep.reshape((-1, slots_rep.shape[-1])).unsqueeze(1).unsqueeze(2)
+        slots = slots.repeat((1, 16, 16, 1))
+        
+        # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
+        x = self.decoder_cnn(slots)
+        # `x` has shape: [batch_size*num_slots, width, height, num_channels+1].
+
+        # Undo combination of slot and batch dimension; split alpha masks.
+        recons, masks = x.reshape(image.shape[0], -1, x.shape[1], x.shape[2], x.shape[3]).split([3,1], dim=-1)
+        # `recons` has shape: [batch_size, num_slots, width, height, num_channels].
+        # `masks` has shape: [batch_size, num_slots, width, height, 1].
+
+        # Normalize alpha masks over slots.
+        masks = nn.Softmax(dim=1)(masks)
+        recon_combined = torch.sum(recons * masks, dim=1)  # Recombine image.
+        recon_combined = recon_combined.permute(0,3,1,2)
+        # `recon_combined` has shape: [batch_size, width, height, num_channels].
+
+
+        if self.training:
+            # Only run projection head when training
+            return recon_combined, recons, masks, slots_rep, self.projection_head(slots_rep, vis_step)
+            # `self.projection_head` returns a dictionary of losses and logged values.
+
+        return recon_combined, recons, masks, slots_rep, None
 
 
 

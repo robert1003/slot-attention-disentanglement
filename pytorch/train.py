@@ -25,13 +25,23 @@ def main(opt):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     resolution = (128, 128)
 
-    if opt.dataset == "clevr":
+    if opt.dinosaur:
+        # Resolution is hard-coded by the frozen ViT input dimensions
+        resolution = (224, 224)
+        train_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, split='train', resolution=resolution)
+    elif opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train")
     else:
         train_set = MultiDSprites(path=opt.dataset_path, split='train')
 
     if opt.base:
         model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim).to(device)
+    elif opt.dinosaur:
+        # Hidden dimension must be dimension of ViT encoding for each token
+        hid_dim = 768
+        model = DINOSAURProjection(resolution, opt.num_slots, opt.num_iterations, hid_dim, 
+                                        opt.proj_dim, std_target=opt.std_target, vis=opt.vis_freq > 0, 
+                                        cov_div_square=opt.cov_div_sq).to(device)
     else:
         model = SlotAttentionProjection(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, 
                                         opt.proj_dim, std_target=opt.std_target, vis=opt.vis_freq > 0, 
@@ -88,7 +98,11 @@ def main(opt):
                 recon_combined, recons, masks, slots = model(image)
                 loss = criterion(recon_combined, image)
             else: 
-                recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
+                if opt.dinosaur:
+                    embedding = sample['embedding'].to(device)
+                    recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, image, vis_step)
+                else:
+                    recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
                 proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + opt.cov_weight * proj_loss_dict["cov_loss"]
                 recon_loss = criterion(recon_combined, image)
                 proj_loss *= opt.proj_weight
@@ -239,6 +253,8 @@ if __name__ == "__main__":
     parser.add_argument('--store_freq', default=10000, type=int, help='frequency at which to save model (in steps)')
     parser.add_argument('--std_target', default=1.0, type=float, help='target std. deviation for each projection space dimension')
     parser.add_argument('--cov-div-sq', action='store_true', help='divide projection head covariance by the square of the number of projection dimensions')
+    parser.add_argument('--dinosaur', action='store_true', help='run projection head SA on top of frozen ViT embeddings')
+    parser.add_argument('--embed_path', default="./data/coco/embedding", type=str, help='path to pre-generated COCO 2017 embeddings')
 
     main(parser.parse_args())
 
