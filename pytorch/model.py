@@ -172,6 +172,8 @@ class SlotAttentionAutoEncoder(nn.Module):
             iters = self.num_iterations,
             eps = 1e-8, 
             hidden_dim = 128)
+        
+        self.width_init = self.height_init = 8
 
     def forward(self, image):
         # `image` has shape: [batch_size, num_channels, width, height].
@@ -184,13 +186,16 @@ class SlotAttentionAutoEncoder(nn.Module):
         x = self.fc2(x)  # Feedforward network on set.
         # `x` has shape: [batch_size, width*height, input_size].
 
+        return self._forward_post_backbone(x, image)
+
+    def _forward_post_backbone(self, x, image):
         # Slot Attention module.
         slots_rep = self.slot_attention(x)
         # `slots_rep` has shape: [batch_size, num_slots, slot_size].
 
         # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
         slots = slots_rep.reshape((-1, slots_rep.shape[-1])).unsqueeze(1).unsqueeze(2)
-        slots = slots.repeat((1, 8, 8, 1))
+        slots = slots.repeat((1, self.height_init, self.width_init, 1))
         
         # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
         x = self.decoder_cnn(slots)
@@ -329,63 +334,27 @@ class ProjectionHead(nn.Module):
 
 
 
-class DINOSAURProjection(nn.Module):
+class DINOSAURProjection(SlotAttentionProjection):
     def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis=False, cov_div_square=False):
-        super().__init__()
+        super().__init__(resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis, cov_div_square)
 
         # TODO: this reconstructs (224, 224) but we can see if default (128, 128) gives better results
         self.width_init = self.height_init = 16
-
-        self.hid_dim = hid_dim
-        self.resolution = resolution
-        self.num_slots = num_slots
-        self.num_iterations = num_iterations
-
         self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
 
-        self.slot_attention = SlotAttention(
-            num_slots=self.num_slots,
-            dim=hid_dim,
-            iters = self.num_iterations,
-            eps = 1e-8, 
-            hidden_dim = 128)  
-        
-        self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, std_target, vis=vis, cov_div_square=cov_div_square)
-
-    def forward(self, x, image, vis_step):
-        # `image` has shape: [batch_size, num_channels, width, height].
-        # `x` has shape: [batch_size, width*height, input_size].
-
-        # Slot Attention module.
-        slots_rep = self.slot_attention(x)
-        # `slots_rep` has shape: [batch_size, num_slots, slot_size].
-
-        # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
-        slots = slots_rep.reshape((-1, slots_rep.shape[-1])).unsqueeze(1).unsqueeze(2)
-        slots = slots.repeat((1, self.height_init, self.width_init, 1))
-        
-        # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
-        x = self.decoder_cnn(slots)
-        # `x` has shape: [batch_size*num_slots, width, height, num_channels+1].
-
-        # Undo combination of slot and batch dimension; split alpha masks.
-        recons, masks = x.reshape(image.shape[0], -1, x.shape[1], x.shape[2], x.shape[3]).split([3,1], dim=-1)
+    def forward(self, embed, image, vis_step):
+        recon_combined, recons, masks, slots = super()._forward_post_backbone(embed, image)
+        # `recon_combined` has shape: [batch_size, width, height, num_channels].
         # `recons` has shape: [batch_size, num_slots, width, height, num_channels].
         # `masks` has shape: [batch_size, num_slots, width, height, 1].
-
-        # Normalize alpha masks over slots.
-        masks = nn.Softmax(dim=1)(masks)
-        recon_combined = torch.sum(recons * masks, dim=1)  # Recombine image.
-        recon_combined = recon_combined.permute(0,3,1,2)
-        # `recon_combined` has shape: [batch_size, width, height, num_channels].
-
+        # `slots` has shape: [batch_size, num_slots, slot_size].
 
         if self.training:
             # Only run projection head when training
-            return recon_combined, recons, masks, slots_rep, self.projection_head(slots_rep, vis_step)
+            return recon_combined, recons, masks, slots, self.projection_head(slots, vis_step)
             # `self.projection_head` returns a dictionary of losses and logged values.
 
-        return recon_combined, recons, masks, slots_rep, None
+        return recon_combined, recons, masks, slots, None
 
 
 
