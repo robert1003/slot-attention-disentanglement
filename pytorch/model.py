@@ -362,7 +362,7 @@ class DINOSAURProjection(nn.Module):
 
         # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
         slots = slots_rep.reshape((-1, slots_rep.shape[-1])).unsqueeze(1).unsqueeze(2)
-        slots = slots.repeat((1, 16, 16, 1))
+        slots = slots.repeat((1, self.height_init, self.width_init, 1))
         
         # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
         x = self.decoder_cnn(slots)
