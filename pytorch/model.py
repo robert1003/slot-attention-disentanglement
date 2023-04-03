@@ -274,9 +274,11 @@ class ProjectionHead(nn.Module):
         if self.cov_over_slots:
             # To get covariance bbetween slots we need to transpose it to [batch_size, proj_dim, num_slots]
             proj = projection.permute(0, 2, 1)
+        else:
+            proj = projection
 
         # Collect all slots over the entire batch
-        proj = projection.reshape((-1,) + projection.shape[2:])
+        proj = proj.reshape((-1,) + proj.shape[2:])
         # `proj` has shape: [batch_size*num_slots, proj_dim].
         # cov. over slots shape: [batch_size*proj_dim, num_slots].
         
