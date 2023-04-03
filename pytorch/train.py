@@ -237,6 +237,7 @@ if __name__ == "__main__":
     parser.add_argument('--store_freq', default=10000, type=int, help='frequency at which to save model (in steps)')
     parser.add_argument('--std_target', default=1.0, type=float, help='target std. deviation for each projection space dimension')
     parser.add_argument('--cov-div-sq', action='store_true', help='divide projection head covariance by the square of the number of projection dimensions')
+    parser.add_argument('--slot-cov', action='store_true', help='calculate covariance over slots rather than over projection feature dimension')
 
     main(parser.parse_args())
 

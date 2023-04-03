@@ -243,6 +243,7 @@ class ProjectionHead(nn.Module):
         self.gamma = opt.std_target
         self.eps = epsilon      # small constant for numerical stability
         self.vis = vis
+        self.cov_over_slots = opt.slot_cov
 
         if opt.cov_div_sq:
             self.cov_div = self.proj_dim**2
@@ -270,13 +271,17 @@ class ProjectionHead(nn.Module):
         projection = self.projector(x)
         # `projection` has shape: [batch_size, num_slots, proj_dim].
 
-        # To get covariance bbetween slots we need to transpose it to [batch_size, proj_dim, num_slots]
-        proj = projection.permute(0, 2, 1)
+        if self.cov_over_slots:
+            # To get covariance bbetween slots we need to transpose it to [batch_size, proj_dim, num_slots]
+            proj = projection.permute(0, 2, 1)
+
         # Collect all slots over the entire batch
         proj = projection.reshape((-1,) + projection.shape[2:])
-        # `proj` has shape: [batch_size*proj_dim, num_slots].
+        # `proj` has shape: [batch_size*num_slots, proj_dim].
+        # cov. over slots shape: [batch_size*proj_dim, num_slots].
         
-        # Our "batch size" here is: (batch size) x (proj dim)
+        # Our "batch size" here is: (batch size) x (# slots)
+        # cov. over slots shape: (batch size) x (proj dim)
         proj_batch_sz = x.shape[0]
 
         # Zero-center each projection dimension (subtract per-dimension mean)
@@ -284,17 +289,20 @@ class ProjectionHead(nn.Module):
         proj_mean = torch.mean(proj, dim=0)
         proj = proj - proj_mean
         # `proj_mean` has shape: [proj_dim].
-        # `proj` has shape: [batch_size*proj_dim, num_slots].
+        # `proj` has shape: [batch_size*num_slots, proj_dim].
+        # cov. over slots shape: [batch_size*proj_dim, num_slots].
 
         # Calculate covariance loss over projected slot features
         cov = (proj.T @ proj) / (proj_batch_sz - 1)
         cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.cov_div)
-        # `cov` has shape: [num_slots, num_slots].
+        # `cov` has shape: [proj_dim, proj_dim].
+        # cov. over slots shape: [num_slots, num_slots].
 
         # Calculate variance loss over projected slot features
         std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
         std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
-        # `std` has shape: [num_slots].
+        # `std` has shape: [proj_dim].
+        # cov. over slots shape: [num_slots].
 
         out = {"std_loss": std_loss, "cov_loss": cov_loss, 
                'proj_mean': torch.mean(proj_mean).item(), 'proj_batch_sz': proj_batch_sz}
