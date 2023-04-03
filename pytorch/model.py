@@ -335,6 +335,27 @@ class ProjectionHead(nn.Module):
 
 
 class DINOSAURProjection(SlotAttentionProjection):
+    """
+    Modified Slot Attention architecture used for the frozen-ViT DINOSAUR experiment. 
+    DINOSAUR: https://openreview.net/pdf?id=b9tUk-f_aG
+    Experiment is generally outlined at the beginning of Section 4.3 and is used to motivate the paper's use
+    of a feature reconstruction objective, rather than the image reconstruction objective used by Slot Attention.
+    Further details and parameters for the experiment are outlined in Appendices E.1 and E.2 (pg. 31 and 33).
+
+    A frozen ViT-B/16 model pretrained with DINO (vit_base_patch16_224_dino) is first used to precompute embeddings 
+    for the entire dataset and store these embeddings to disk. See experiments.py and `generate_coco_embeddings`.
+    These fixed embeddings are then used to train this architecture. Note the use of _forward_post_backbone below
+    which only runs the part of the SlotAttentionAutoEncoder.forward method that comes after the CNN encoder 
+    (specifically the Slot Attention module and the spatial broadcast decoder).
+
+    TODO: some slightly contradictory training config from different parts of the paper
+        Experiment settings (pg 31): LR 4e-4, 
+        Experiment settings (pg33): 0.0002 peak LR, slot dimension 256, MLP hidden dim. 512, 250k steps, batch size 64, 
+                2500 LR warmup steps, cosine annealing, 1.0 gradient clipping, random horizontal flip training augmentation
+    TODO: uses linear positional encodings rather than learned? (pg. 33)
+    TODO: Claims to use 128x128 reconstruction objective, but does not match the 224x224 image size input to the ViT. 
+    TODO: may be the case that we need to use a stronger decoder, but this a design decision we can test
+    """
     def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis=False, cov_div_square=False):
         super().__init__(resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis, cov_div_square)
 
@@ -343,6 +364,8 @@ class DINOSAURProjection(SlotAttentionProjection):
         self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
 
     def forward(self, embed, image, vis_step):
+        # TODO: add one hidden layer MLP
+
         recon_combined, recons, masks, slots = super()._forward_post_backbone(embed, image)
         # `recon_combined` has shape: [batch_size, width, height, num_channels].
         # `recons` has shape: [batch_size, num_slots, width, height, num_channels].
