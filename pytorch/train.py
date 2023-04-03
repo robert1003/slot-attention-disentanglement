@@ -33,9 +33,7 @@ def main(opt):
     if opt.base:
         model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim).to(device)
     else:
-        model = SlotAttentionProjection(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, 
-                                        opt.proj_dim, std_target=opt.std_target, vis=opt.vis_freq > 0, 
-                                        cov_div_square=opt.cov_div_sq).to(device)
+        model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0).to(device)
 
     criterion = nn.MSELoss()
     params = [{'params': model.parameters()}]

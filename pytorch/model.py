@@ -213,10 +213,10 @@ class SlotAttentionAutoEncoder(nn.Module):
 
 
 class SlotAttentionProjection(SlotAttentionAutoEncoder):
-    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis=False, cov_div_square=False):
-        super().__init__(resolution, num_slots, num_iterations, hid_dim)
+    def __init__(self, resolution, opt, vis=False):
+        super().__init__(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim)
 
-        self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, std_target, vis=vis, cov_div_square=cov_div_square)
+        self.projection_head = ProjectionHead(opt, vis=vis)
 
     def forward(self, image, vis_step):
         recon_combined, recons, masks, slots = super().forward(image)
@@ -236,28 +236,28 @@ class SlotAttentionProjection(SlotAttentionAutoEncoder):
 
 
 class ProjectionHead(nn.Module):
-    def __init__(self, num_slots, hid_dim, projection_dim, std_target, epsilon=0.0001, vis=False, cov_div_square=False) -> None:
+    def __init__(self, opt, epsilon=0.0001, vis=False):
         super().__init__()
 
-        self.proj_dim = projection_dim
-        self.gamma = std_target
+        self.proj_dim = opt.proj_dim
+        self.gamma = opt.std_target
         self.eps = epsilon      # small constant for numerical stability
         self.vis = vis
 
-        if cov_div_square:
+        if opt.cov_div_sq:
             self.cov_div = self.proj_dim**2
         else:
             self.cov_div = self.proj_dim
 
         # VICReg paper, Section 4.2. Two FC layers with non-linearities and a final linear layer
         self.projector = nn.Sequential(
-            nn.Linear(hid_dim, projection_dim),
-            nn.BatchNorm1d(num_slots),
+            nn.Linear(opt.hid_dim, opt.proj_dim),
+            nn.BatchNorm1d(opt.num_slots),
             nn.ReLU(),
-            nn.Linear(projection_dim, projection_dim),
-            nn.BatchNorm1d(num_slots),
+            nn.Linear(opt.proj_dim, opt.proj_dim),
+            nn.BatchNorm1d(opt.num_slots),
             nn.ReLU(),
-            nn.Linear(projection_dim, projection_dim)
+            nn.Linear(opt.proj_dim, opt.proj_dim)
         )
 
 
