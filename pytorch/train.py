@@ -99,9 +99,9 @@ def main(opt):
                 vis_dict['slot_sample_mean'] = torch.mean(model.slot_attention.slots_mu).item()
                 vis_dict['slot_sample_std'] = torch.mean(model.slot_attention.slots_sigma).item()
 
-                # Visualize the mean of the per-dimension means of slot projections
-                if not opt.slot_cov:
-                    vis_dict['avg_proj_dim_mean'] = proj_loss_dict['proj_mean']
+                # Visualize the mean of the per-dimension means of slot projections 
+                # (mean of per-slot means for covariance over slots setting)
+                vis_dict['avg_proj_dim_mean'] = proj_loss_dict['proj_mean']
 
                 # Visualize influence of reconstruction loss vs. projection head losses
                 # Positive if reconstruction loss dominates loss, negative if projection losses dominate
@@ -178,7 +178,10 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
         plt.close()
 
         plt.figure(figsize=(10,10))
-        plt.imshow(proj_loss_dict['std_vec'].flatten().unsqueeze(1).repeat((1, 50)), cmap='Blues')
+        if opt.slot_cov:
+            plt.imshow(proj_loss_dict['std_vec'].flatten().unsqueeze(1).repeat((1, 50)), cmap='Blues')
+        else:
+            plt.imshow(proj_loss_dict['std_vec'].unsqueeze(1).repeat((1, 50)), cmap='Blues')
         plt.colorbar()
         vis_dict['std'] = wandb.Image(plt)
         plt.close()

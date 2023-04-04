@@ -325,9 +325,8 @@ class ProjectionHead(nn.Module):
             # `std` has shape: [proj_dim].
             # cov. over slots shape: [num_slots].
 
-        out = {"std_loss": std_loss, "cov_loss": cov_loss, 'proj_batch_sz': proj_batch_sz}
-        if self.cov_over_slots:
-            out['proj_mean'] = torch.mean(proj_mean).item()
+        out = {"std_loss": std_loss, "cov_loss": cov_loss, 'proj_mean': torch.mean(proj_mean).item(),
+               'proj_batch_sz': proj_batch_sz}
 
         if self.vis:
             out['cov_mx'] = cov.detach().cpu()
