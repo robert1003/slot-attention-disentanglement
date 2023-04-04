@@ -167,13 +167,18 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
         # Visualize projection space covariance matrix and feature std. dev. as heat maps
         # Resues proj_loss_dict from last step since model does not use projection head in eval
         plt.figure(figsize=(10,10))
-        plt.imshow(proj_loss_dict['cov_mx'], cmap='Blues')
+        if opt.slot_cov:
+            # When calculating slot covariance, generate a cov. matrix for each image in the batch.
+            # Just sum over batch dimension here to get a matrix we can visualize
+            plt.imshow(torch.sum(proj_loss_dict['cov_mx'], dim=0), cmap='Blues')
+        else:
+            plt.imshow(proj_loss_dict['cov_mx'], cmap='Blues')
         plt.colorbar()
         vis_dict['cov'] = wandb.Image(plt)
         plt.close()
 
         plt.figure(figsize=(10,10))
-        plt.imshow(proj_loss_dict['std_vec'].unsqueeze(1).repeat((1, 50)), cmap='Blues')
+        plt.imshow(proj_loss_dict['std_vec'].flatten().unsqueeze(1).repeat((1, 50)), cmap='Blues')
         plt.colorbar()
         vis_dict['std'] = wandb.Image(plt)
         plt.close()
