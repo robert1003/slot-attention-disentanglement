@@ -265,7 +265,7 @@ class ProjectionHead(nn.Module):
     def forward(self, x, vis_step):
         """
         Calculate projected slot-feature variance and covariance over all the slots for a single batch at once
-        TODO write alternative versions of covariance + batching described in proposal
+        TODO write alternative versions of batching described in proposal
         """
         # Given matrix of slot representations, return loss
         projection = self.projector(x)
