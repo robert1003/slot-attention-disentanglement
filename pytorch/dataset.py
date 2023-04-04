@@ -72,11 +72,10 @@ class MultiDSprites(Dataset):
 
     def __getitem__(self, index):
         image = (self.data[index]*255).astype(np.uint8)
-        mask = (self.mask[index]).astype(np.uint8)
         image = Image.fromarray(image)
         image = image.resize((128 , 128))
         image = self.img_transform(image)
-        sample = {'image': image, 'mask': mask}
+        sample = {'image': image}
 
         return sample
 
