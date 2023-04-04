@@ -100,7 +100,8 @@ def main(opt):
                 vis_dict['slot_sample_std'] = torch.mean(model.slot_attention.slots_sigma).item()
 
                 # Visualize the mean of the per-dimension means of slot projections
-                vis_dict['avg_proj_dim_mean'] = proj_loss_dict['proj_mean']
+                if not opt.slot_cov:
+                    vis_dict['avg_proj_dim_mean'] = proj_loss_dict['proj_mean']
 
                 # Visualize influence of reconstruction loss vs. projection head losses
                 # Positive if reconstruction loss dominates loss, negative if projection losses dominate
