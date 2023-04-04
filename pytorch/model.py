@@ -213,10 +213,10 @@ class SlotAttentionAutoEncoder(nn.Module):
 
 
 class SlotAttentionProjection(SlotAttentionAutoEncoder):
-    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis=False, cov_div_square=False):
-        super().__init__(resolution, num_slots, num_iterations, hid_dim)
+    def __init__(self, resolution, opt, vis=False):
+        super().__init__(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim)
 
-        self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, std_target, vis=vis, cov_div_square=cov_div_square)
+        self.projection_head = ProjectionHead(opt, vis=vis)
 
     def forward(self, image, vis_step):
         recon_combined, recons, masks, slots = super().forward(image)
@@ -236,66 +236,97 @@ class SlotAttentionProjection(SlotAttentionAutoEncoder):
 
 
 class ProjectionHead(nn.Module):
-    def __init__(self, num_slots, hid_dim, projection_dim, std_target, epsilon=0.0001, vis=False, cov_div_square=False) -> None:
+    def __init__(self, opt, epsilon=0.0001, vis=False):
         super().__init__()
 
-        self.proj_dim = projection_dim
-        self.gamma = std_target
+        self.proj_dim = opt.proj_dim
+        self.gamma = opt.std_target
         self.eps = epsilon      # small constant for numerical stability
         self.vis = vis
+        self.cov_over_slots = opt.slot_cov
 
-        if cov_div_square:
+        if opt.cov_div_sq:
             self.cov_div = self.proj_dim**2
         else:
             self.cov_div = self.proj_dim
 
         # VICReg paper, Section 4.2. Two FC layers with non-linearities and a final linear layer
         self.projector = nn.Sequential(
-            nn.Linear(hid_dim, projection_dim),
-            nn.BatchNorm1d(num_slots),
+            nn.Linear(opt.hid_dim, opt.proj_dim),
+            nn.BatchNorm1d(opt.num_slots),
             nn.ReLU(),
-            nn.Linear(projection_dim, projection_dim),
-            nn.BatchNorm1d(num_slots),
+            nn.Linear(opt.proj_dim, opt.proj_dim),
+            nn.BatchNorm1d(opt.num_slots),
             nn.ReLU(),
-            nn.Linear(projection_dim, projection_dim)
+            nn.Linear(opt.proj_dim, opt.proj_dim)
         )
 
 
     def forward(self, x, vis_step):
         """
         Calculate projected slot-feature variance and covariance over all the slots for a single batch at once
-        TODO write alternative versions of covariance + batching described in proposal
+        TODO write alternative versions of batching described in proposal
         """
         # Given matrix of slot representations, return loss
         projection = self.projector(x)
         # `projection` has shape: [batch_size, num_slots, proj_dim].
 
-        # Collect all slots over the entire batch
-        proj = projection.reshape((-1,) + projection.shape[2:])
-        # `proj` has shape: [batch_size*num_slots, proj_dim].
-        
-        # Our "batch size" here is: (batch size) x (# slots)
-        proj_batch_sz = x.shape[0]
+        if self.cov_over_slots:
+            # Calculate covariance over slots loss for each image separately, then take average. Same for std loss.
+            # Take mean over feature dimension for each slot of each batch (separately)
+            proj = projection
+            proj_mean = torch.mean(proj, dim=2, keepdim=True)
+            proj = proj - proj_mean
+            proj_batch_sz = proj.shape[2]
+            # `proj_mean` has shape: [batch_size, num_slots, 1]
+            # `proj` has shape: [batch_size, num_slots, proj_dim]
 
-        # Zero-center each projection dimension (subtract per-dimension mean)
-        # Should not affect the variance/covariance calculations below, but may be important for numerical stability?
-        proj_mean = torch.mean(proj, dim=0)
-        proj = proj - proj_mean
-        # `proj_mean` has shape: [proj_dim].
-        # `proj` has shape: [batch_size*num_slots, proj_dim].
+            # Einstein summation performs per-image matrix multiplication without need for transpose or iteration
+            cov = torch.einsum('lij, lkj -> lik', proj, proj) / (proj_batch_sz - 1)
+            # `cov_out` has shape: [batch_size, num_slots, num_slots]
+            
+            # Set all diagonal elements (in each element of the batch) to zero --> equivalent to operating only on off diagonal elements
+            cov_calc = cov
+            torch.diagonal(cov_calc, 0, dim1=1, dim2=2).zero_()             # isolate off-diag cov. matrix elements for each image
+            cov_calc = torch.flatten(cov_calc, start_dim=1, end_dim=2)      # flatten all off-diag elements for each image into a vector
+            cov_calc = cov_calc.pow_(2).sum(dim=1).div(self.cov_div)        # apply covariance loss calc. to each image separately
+            cov_loss = torch.mean(cov_calc)                                 # average covariance losses over all images in batch
+            # `cov_calc` has shape: [batch_size]
+            
+            # Compare to unoptimized baseline
+            # cov_loss_test = sum([self._off_diagonal(cov[idx]).pow_(2).sum().div(self.cov_div) for idx in range(cov.shape[0])]) / cov.shape[0]
+            # assert abs(cov_loss_test.item() - cov_loss.item()) < 1e-8
+            
+            std = torch.sqrt(torch.var(proj, dim=2) + self.eps)
+            std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
+            # `std` has shape: [num_slots]
+        else:
+            # Calculate covariance loss over projected slot features
+            # Collect all slots over the entire batch
+            proj = projection.reshape((-1,) + projection.shape[2:])
+            # `proj` has shape: [batch_size*num_slots, proj_dim].
+            
+            # Our "batch size" here is: (batch size) x (num_slots)
+            proj_batch_sz = proj.shape[0]
 
-        # Calculate covariance loss over projected slot features
-        cov = (proj.T @ proj) / (proj_batch_sz - 1)
-        cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.cov_div)
-        # `cov` has shape: [proj_dim, proj_dim].
+            # Zero-center each projection dimension (subtract per-dimension mean)
+            proj_mean = torch.mean(proj, dim=0)
+            proj = proj - proj_mean
+            # `proj_mean` has shape: [proj_dim].
+            # `proj` has shape: [batch_size*num_slots, proj_dim].
 
-        # Calculate variance loss over projected slot features
-        std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
-        std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
-        # `std` has shape: [proj_dim].
+            cov = (proj.T @ proj) / (proj_batch_sz - 1)
+            cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.cov_div)
+            # `cov` has shape: [proj_dim, proj_dim].
 
-        out = {"std_loss": std_loss, "cov_loss": cov_loss, 
-               'proj_mean': torch.mean(proj_mean).item(), 'proj_batch_sz': proj_batch_sz}
+            # Calculate variance loss over projected slot features
+            std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
+            std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
+            # `std` has shape: [proj_dim].
+            # cov. over slots shape: [num_slots].
+
+        out = {"std_loss": std_loss, "cov_loss": cov_loss, 'proj_mean': torch.mean(proj_mean).item(),
+               'proj_batch_sz': proj_batch_sz}
 
         if self.vis:
             out['cov_mx'] = cov.detach().cpu()
