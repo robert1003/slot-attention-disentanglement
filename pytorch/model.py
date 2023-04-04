@@ -272,28 +272,34 @@ class ProjectionHead(nn.Module):
         # `projection` has shape: [batch_size, num_slots, proj_dim].
 
         if self.cov_over_slots:
-            # Calculate covariance for each image separately and then sum over the covariances
-            cov_loss = 0
-            std_loss = 0
-            for idx in range(projection.shape[0]):
-                # Our "batch size" here is: proj_dim
-                proj = projection[idx].T
-                proj_batch_sz = proj.shape[0]
+            # Calculate covariance over slots loss for each image separately, then take average. Same for std loss.
+            # Take mean over feature dimension for each slot of each batch (separately)
+            proj = projection
+            proj_mean = torch.mean(proj, dim=2, keepdim=True)
+            proj = proj - proj_mean
+            proj_batch_sz = proj.shape[2]
+            # `proj_mean` has shape: [batch_size, num_slots, 1]
+            # `proj` has shape: [batch_size, num_slots, proj_dim]
 
-                # Zero-center each slot (subtract per-slot mean)
-                proj_mean = torch.mean(proj, dim=0)
-                proj = proj - proj_mean
-                # `proj_mean` has shape: num_slots
-                # `proj` has shape: num_slots
-
-                cov = (proj.T @ proj) / (proj_batch_sz - 1)
-                cov_loss += self._off_diagonal(cov).pow_(2).sum().div(self.cov_div)
-                # `cov` has shape: [num_slots, num_slots].
-
-                # Calculate variance loss over each slot --> TODO(as) do we really want this term here? not sure variance over slots is meaningful...
-                std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
-                std_loss += torch.mean(torch.nn.functional.relu(self.gamma - std))    
-                # `std` has shape: [num_slots].
+            # Einstein summation performs per-image matrix multiplication without need for transpose or iteration
+            cov = torch.einsum('lij, lkj -> lik', proj, proj) / (proj_batch_sz - 1)
+            # `cov_out` has shape: [batch_size, num_slots, num_slots]
+            
+            # Set all diagonal elements (in each element of the batch) to zero --> equivalent to operating only on off diagonal elements
+            cov_calc = cov
+            torch.diagonal(cov_calc, 0, dim1=1, dim2=2).zero_()             # isolate off-diag cov. matrix elements for each image
+            cov_calc = torch.flatten(cov_calc, start_dim=1, end_dim=2)      # flatten all off-diag elements for each image into a vector
+            cov_calc = cov_calc.pow_(2).sum(dim=1).div(self.cov_div)        # apply covariance loss calc. to each image separately
+            cov_loss = torch.mean(cov_calc)                                 # average covariance losses over all images in batch
+            # `cov_calc` has shape: [batch_size]
+            
+            # Compare to unoptimized baseline
+            # cov_loss_test = sum([self._off_diagonal(cov[idx]).pow_(2).sum().div(self.cov_div) for idx in range(cov.shape[0])]) / cov.shape[0]
+            # assert abs(cov_loss_test.item() - cov_loss.item()) < 1e-8
+            
+            std = torch.sqrt(torch.var(proj, dim=2) + self.eps)
+            std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
+            # `std` has shape: [num_slots]
         else:
             # Calculate covariance loss over projected slot features
             # Collect all slots over the entire batch
