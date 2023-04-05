@@ -96,7 +96,7 @@ def main(opt):
                 vis_dict['cov_loss'] = proj_loss_dict['cov_loss'].item()
 
                 # Visualize covariance loss with all weighting to make hyperparameter tuning easier
-                vis_dict['weighted_cov_loss'] = opt.var_weight * opt.cov_weight * proj_loss_dict["cov_loss"]
+                vis_dict['weighted_cov_loss'] = opt.proj_weight * opt.cov_weight * proj_loss_dict["cov_loss"]
 
                 # Basic visualization of distribution of slot initializations in Slot Attn. module
                 vis_dict['slot_sample_mean'] = torch.mean(model.slot_attention.slots_mu).item()
