@@ -307,6 +307,10 @@ class ProjectionHead(nn.Module):
             # `proj` has shape: [batch_size*num_slots, proj_dim].
             
             # Our "batch size" here is: (batch size) x (num_slots)
+            # NOTE: previously, this was x.shape[0] which is actually equal to batch size
+            # when we expected it to be (batch size) x (num_slots). Luckily, num_slots
+            # has been constant over all runs so we will just need to adjust cov_weight by 
+            # a factor of num_slots to replicate past results for cov over slot features.
             proj_batch_sz = proj.shape[0]
 
             # Zero-center each projection dimension (subtract per-dimension mean)
