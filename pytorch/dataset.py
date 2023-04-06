@@ -84,7 +84,6 @@ class MultiDSprites(Dataset):
         image = Image.fromarray(image)
         image = image.resize((128 , 128))
         image = self.img_transform(image)
-        print(onehot_masks.shape)
         sample = {'image': image, 'mask': onehot_masks}
 
         return sample
