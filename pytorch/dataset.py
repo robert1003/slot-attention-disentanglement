@@ -56,7 +56,7 @@ class CLEVR(Dataset):
         return len(self.files)
 
 class MultiDSprites(Dataset):
-    def __init__(self, path='./data/multi_dsprites/processed', split='train', unique=True):
+    def __init__(self, path='./data/multi_dsprites/processed', split='train', unique=True, num_slots = 6):
         super(MultiDSprites, self).__init__()
 
         assert split in ['train', 'val', 'test']
@@ -69,14 +69,23 @@ class MultiDSprites(Dataset):
             file_split + '_masks_rand4_' + ('unique' if unique else '') + '.npy'))
         self.img_transform = transforms.Compose([
                transforms.ToTensor()])
+        self.num_slots = num_slots
 
     def __getitem__(self, index):
         image = (self.data[index]*255).astype(np.uint8)
-        mask = (self.mask[index]).astype(np.uint8)
+        mask = self.mask[index]
+        # Resize mask
+        mask = np.array(Image.fromarray(mask.squeeze(-1).astype(np.uint8), mode='L').resize((128,128), resample = Resampling.NEAREST))
+        # Convert to onehot
+        onehot_masks = (np.arange(1,mask.max()+1) == mask[...,None]).astype(int)
+        # pad zeros
+        zeros_array = np.zeros((onehot_masks.shape[0],onehot_masks.shape[1], max(0,self.num_slots - onehot_masks.shape[2])))
+        onehot_masks = np.concatenate((onehot_masks, zeros_array), axis=2)
         image = Image.fromarray(image)
         image = image.resize((128 , 128))
         image = self.img_transform(image)
-        sample = {'image': image, 'mask': mask}
+        print(onehot_masks.shape)
+        sample = {'image': image, 'mask': onehot_masks}
 
         return sample
 

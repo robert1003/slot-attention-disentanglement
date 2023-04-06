@@ -43,7 +43,6 @@ def adjusted_rand_index(true_mask, pred_mask):
     true_mask = true_mask.float()
     # Sum along dim 1 and 2 to get the number of points in each cluster.
     n_points = torch.sum(true_mask, dim=(1, 2))
-
     nij = torch.einsum('bji,bjk->bki', pred_mask_oh, true_mask)
     a = torch.sum(nij, dim=1)
     b = torch.sum(nij, dim=2)

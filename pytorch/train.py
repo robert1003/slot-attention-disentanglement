@@ -28,7 +28,7 @@ def main(opt):
     if opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train")
     else:
-        train_set = MultiDSprites(path=opt.dataset_path, split='train')
+        train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots)
 
     if opt.base:
         model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim).to(device)
