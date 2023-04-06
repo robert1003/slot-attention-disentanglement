@@ -75,7 +75,7 @@ class MultiDSprites(Dataset):
         image = (self.data[index]*255).astype(np.uint8)
         mask = self.mask[index]
         # Resize mask
-        mask = np.array(Image.fromarray(mask.squeeze(-1).astype(np.uint8), mode='L').resize((128,128), resample = Resampling.NEAREST))
+        mask = np.array(Image.fromarray(mask.squeeze(-1).astype(np.uint8), mode='L').resize((128,128), resample = Image.Resampling.NEAREST))
         # Convert to onehot
         onehot_masks = (np.arange(1,mask.max()+1) == mask[...,None]).astype(int)
         # pad zeros
