@@ -147,7 +147,7 @@ class Decoder(nn.Module):
 
 """Slot Attention-based auto-encoder for object discovery."""
 class SlotAttentionAutoEncoder(nn.Module):
-    def __init__(self, resolution, num_slots, num_iterations, hid_dim):
+    def __init__(self, resolution, num_slots, num_iterations, hid_dim, sigmoid=False):
         """Builds the Slot Attention-based auto-encoder.
         Args:
         resolution: Tuple of integers specifying width and height of input image.
@@ -159,6 +159,7 @@ class SlotAttentionAutoEncoder(nn.Module):
         self.resolution = resolution
         self.num_slots = num_slots
         self.num_iterations = num_iterations
+        self.sigmoid = sigmoid
 
         self.encoder_cnn = Encoder(self.resolution, self.hid_dim)
         self.decoder_cnn = Decoder(self.hid_dim, self.resolution)
@@ -207,6 +208,10 @@ class SlotAttentionAutoEncoder(nn.Module):
         recon_combined = recon_combined.permute(0,3,1,2)
         # `recon_combined` has shape: [batch_size, width, height, num_channels].
 
+        if self.sigmoid:
+            # Normalize reconstruction to 0-1 range
+            recon_combined = torch.nn.functional.sigmoid(recon_combined)
+
         return recon_combined, recons, masks, slots_rep
 
 
@@ -214,7 +219,7 @@ class SlotAttentionAutoEncoder(nn.Module):
 
 class SlotAttentionProjection(SlotAttentionAutoEncoder):
     def __init__(self, resolution, opt, vis=False):
-        super().__init__(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim)
+        super().__init__(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss)
 
         self.projection_head = ProjectionHead(opt, vis=vis)
 
