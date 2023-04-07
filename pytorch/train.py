@@ -28,11 +28,12 @@ def main(opt):
 
     if opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train")
-    else:
-        #train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots)
+    elif opt.dataset == 'multid-gray':
         assert opt.num_slots == 6, "Invalid number of slots for MultiDSpritesGrayBackground"
         train_set = MultiDSpritesGrayBackground(path=opt.dataset_path)
         resolution = (64, 64)
+    else:
+        train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots)
 
     if opt.base:
         model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss).to(device)
@@ -235,9 +236,10 @@ def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_
         vis_dict['proj_input_norm'] = proj_loss_dict['proj_input_norm']
 
     # Visualize ARI performance
-    flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
-    flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
-    vis_dict['ari'] = adjusted_rand_index(sample['mask'], flattened_masks).mean().item()
+    if 'mask' in sample:
+        flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
+        flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
+        vis_dict['ari'] = adjusted_rand_index(sample['mask'], flattened_masks).mean().item()
 
     return vis_dict
 
@@ -258,7 +260,7 @@ if __name__ == "__main__":
     parser.add_argument('--decay_steps', default=100000, type=int, help='Number of steps for the learning rate decay.')
     parser.add_argument('--num_train_steps', default=500000, type=int, help='Number of training steps.')
     parser.add_argument('--num_workers', default=4, type=int, help='number of workers for loading data')
-    parser.add_argument('--dataset', choices=['clevr', 'multid'], help='dataset to train on')
+    parser.add_argument('--dataset', choices=['clevr', 'multid', 'multid-gray'], help='dataset to train on')
     parser.add_argument('--dataset_path', default="./data/CLEVR_v1.0/images", type=str, help='path to dataset')
     parser.add_argument('--proj_dim', default=1024, type=int, help='dimension of the projection space')
     parser.add_argument('--proj_weight', default=1.0, type=float, help='weight given to sum of projection head losses')
