@@ -81,13 +81,18 @@ def main(opt):
             optimizer.param_groups[0]['lr'] = learning_rate
             image = sample['image'].to(device)
             vis_dict['learning_rate'] = learning_rate
+
+            if i < opt.cov_warmup:
+                cov_weight = opt.cov_weight * (i / opt.cov_warmup)
+            else:
+                cov_weight = opt.cov_weight
             
             if opt.base:
                 recon_combined, recons, masks, slots = model(image)
                 loss = criterion(recon_combined, image)
             else: 
                 recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
-                proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + opt.cov_weight * proj_loss_dict["cov_loss"]
+                proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + cov_weight * proj_loss_dict["cov_loss"]
                 recon_loss = criterion(recon_combined, image)
                 proj_loss *= opt.proj_weight
                 loss = recon_loss + proj_loss
@@ -96,7 +101,7 @@ def main(opt):
                 vis_dict['cov_loss'] = proj_loss_dict['cov_loss'].item()
 
                 # Visualize covariance loss with all weighting to make hyperparameter tuning easier
-                vis_dict['weighted_cov_loss'] = opt.proj_weight * opt.cov_weight * proj_loss_dict["cov_loss"]
+                vis_dict['weighted_cov_loss'] = opt.proj_weight * cov_weight * proj_loss_dict["cov_loss"]
 
                 # Basic visualization of distribution of slot initializations in Slot Attn. module
                 vis_dict['slot_sample_mean'] = torch.mean(model.slot_attention.slots_mu).item()
@@ -250,6 +255,7 @@ if __name__ == "__main__":
     parser.add_argument('--std_target', default=1.0, type=float, help='target std. deviation for each projection space dimension')
     parser.add_argument('--cov-div-sq', action='store_true', help='divide projection head covariance by the square of the number of projection dimensions')
     parser.add_argument('--slot-cov', action='store_true', help='calculate covariance over slots rather than over projection feature dimension')
+    parser.add_argument('--cov-warmup', default=0, type=int, help='number of warmup steps for the covariance loss')
 
     main(parser.parse_args())
 
