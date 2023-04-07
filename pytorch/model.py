@@ -256,15 +256,19 @@ class ProjectionHead(nn.Module):
             self.cov_div = self.proj_dim
 
         # VICReg paper, Section 4.2. Two FC layers with non-linearities and a final linear layer
-        self.projector = nn.Sequential(
-            nn.Linear(opt.hid_dim, opt.proj_dim),
-            nn.BatchNorm1d(opt.num_slots),
-            nn.ReLU(),
-            nn.Linear(opt.proj_dim, opt.proj_dim),
-            nn.BatchNorm1d(opt.num_slots),
-            nn.ReLU(),
-            nn.Linear(opt.proj_dim, opt.proj_dim)
-        )
+        if not opt.identity_proj:
+            self.projector = nn.Sequential(
+                nn.Linear(opt.hid_dim, opt.proj_dim),
+                nn.BatchNorm1d(opt.num_slots),
+                nn.ReLU(),
+                nn.Linear(opt.proj_dim, opt.proj_dim),
+                nn.BatchNorm1d(opt.num_slots),
+                nn.ReLU(),
+                nn.Linear(opt.proj_dim, opt.proj_dim)
+            )
+        else:
+            assert opt.hid_dim == opt.proj_dim, "Identity projection requires hidden dimension size = projection dimention size"
+            self.projector = nn.Identity()
 
 
     def forward(self, x, vis_step):
