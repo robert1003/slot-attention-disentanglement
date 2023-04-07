@@ -31,13 +31,16 @@ def main(opt):
         train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots)
 
     if opt.base:
-        model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim).to(device)
+        model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss).to(device)
     else:
-        model = SlotAttentionProjection(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, 
-                                        opt.proj_dim, std_target=opt.std_target, vis=opt.vis_freq > 0, 
-                                        cov_div_square=opt.cov_div_sq).to(device)
+        model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0).to(device)
 
-    criterion = nn.MSELoss()
+    if opt.bce_loss:
+        # Assumes image is normalized to 0-1 range
+        criterion = nn.BCELoss()
+    else:
+        criterion = nn.MSELoss()
+
     params = [{'params': model.parameters()}]
     train_dataloader = torch.utils.data.DataLoader(train_set, batch_size=opt.batch_size,
                             shuffle=True, num_workers=opt.num_workers, pin_memory=True)
@@ -97,11 +100,15 @@ def main(opt):
                 vis_dict['std_loss'] = proj_loss_dict['std_loss'].item()
                 vis_dict['cov_loss'] = proj_loss_dict['cov_loss'].item()
 
+                # Visualize covariance loss with all weighting to make hyperparameter tuning easier
+                vis_dict['weighted_cov_loss'] = opt.proj_weight * opt.cov_weight * proj_loss_dict["cov_loss"]
+
                 # Basic visualization of distribution of slot initializations in Slot Attn. module
                 vis_dict['slot_sample_mean'] = torch.mean(model.slot_attention.slots_mu).item()
                 vis_dict['slot_sample_std'] = torch.mean(model.slot_attention.slots_sigma).item()
 
-                # Visualize the mean of the per-dimension means of slot projections
+                # Visualize the mean of the per-dimension means of slot projections 
+                # (mean of per-slot means for covariance over slots setting)
                 vis_dict['avg_proj_dim_mean'] = proj_loss_dict['proj_mean']
 
                 # Visualize influence of reconstruction loss vs. projection head losses
@@ -168,13 +175,21 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
         # Visualize projection space covariance matrix and feature std. dev. as heat maps
         # Resues proj_loss_dict from last step since model does not use projection head in eval
         plt.figure(figsize=(10,10))
-        plt.imshow(proj_loss_dict['cov_mx'], cmap='Blues')
+        if opt.slot_cov:
+            # When calculating slot covariance, generate a cov. matrix for each image in the batch.
+            # Just sum over batch dimension here to get a matrix we can visualize
+            plt.imshow(torch.sum(proj_loss_dict['cov_mx'], dim=0), cmap='Blues')
+        else:
+            plt.imshow(proj_loss_dict['cov_mx'], cmap='Blues')
         plt.colorbar()
         vis_dict['cov'] = wandb.Image(plt)
         plt.close()
 
         plt.figure(figsize=(10,10))
-        plt.imshow(proj_loss_dict['std_vec'].unsqueeze(1).repeat((1, 50)), cmap='Blues')
+        if opt.slot_cov:
+            plt.imshow(proj_loss_dict['std_vec'].flatten().unsqueeze(1).repeat((1, 50)), cmap='Blues')
+        else:
+            plt.imshow(proj_loss_dict['std_vec'].unsqueeze(1).repeat((1, 50)), cmap='Blues')
         plt.colorbar()
         vis_dict['std'] = wandb.Image(plt)
         plt.close()
@@ -239,6 +254,9 @@ if __name__ == "__main__":
     parser.add_argument('--store_freq', default=10000, type=int, help='frequency at which to save model (in steps)')
     parser.add_argument('--std_target', default=1.0, type=float, help='target std. deviation for each projection space dimension')
     parser.add_argument('--cov-div-sq', action='store_true', help='divide projection head covariance by the square of the number of projection dimensions')
+    parser.add_argument('--slot-cov', action='store_true', help='calculate covariance over slots rather than over projection feature dimension')
+    parser.add_argument('--bce-loss', action='store_true', help='calculate the reconstruction loss using binary cross entropy rather than mean squared error')
+
 
     main(parser.parse_args())
 
