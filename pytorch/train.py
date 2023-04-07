@@ -13,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
 from PIL import Image as Image, ImageEnhance
 
+from metrics import adjusted_rand_index
 import torchvision
 
 import wandb
@@ -28,7 +29,10 @@ def main(opt):
     if opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train")
     else:
-        train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots)
+        #train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots)
+        assert opt.num_slots == 6, "Invalid number of slots for MultiDSpritesGrayBackground"
+        train_set = MultiDSpritesGrayBackground(path=opt.dataset_path)
+        resolution = (64, 64)
 
     if opt.base:
         model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss).to(device)
@@ -127,9 +131,9 @@ def main(opt):
             vis_dict['loss'] = loss
             if vis_step:
                 if not opt.base:
-                    vis_dict = visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_loss_dict)
+                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict)
                 else:
-                    vis_dict = visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, None)
+                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, None)
             wandb.log(vis_dict, step=i)
             
             total_loss += loss.item()
@@ -174,8 +178,9 @@ def main(opt):
 
 
 
-def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_loss_dict):
+def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict):
     """Add visualizations to the dictionary to be logged with W&B"""
+    image = sample['image']
     if not opt.base:
         # Visualize projection space covariance matrix and feature std. dev. as heat maps
         # Resues proj_loss_dict from last step since model does not use projection head in eval
@@ -228,6 +233,11 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
         vis_dict['proj_diff_norm'] = proj_loss_dict['proj_diff_norm']
         vis_dict['proj_out_norm'] = proj_loss_dict['proj_out_norm']
         vis_dict['proj_input_norm'] = proj_loss_dict['proj_input_norm']
+
+    # Visualize ARI performance
+    flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
+    flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
+    vis_dict['ari'] = adjusted_rand_index(sample['mask'], flattened_masks).mean().item()
 
     return vis_dict
 

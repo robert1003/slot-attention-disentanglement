@@ -90,3 +90,33 @@ class MultiDSprites(Dataset):
 
     def __len__(self):
         return len(self.data)
+
+
+
+class MultiDSpritesGrayBackground(Dataset):
+    def __init__(self, path='./data/multi_dsprites/processed'):
+        super(MultiDSpritesGrayBackground, self).__init__()
+        self.root_dir = path
+        self.files = [i for i in os.listdir(self.root_dir) if 'image' in i]
+        self.img_transform = transforms.Compose([transforms.ToTensor()])
+
+    def __getitem__(self, index):
+        image_path = self.files[index]
+        image = Image.fromarray(np.load(os.path.join(self.root_dir, image_path)))
+        image = self.img_transform(image)
+
+        mask_path = image_path.replace("image", "mask")
+        mask = np.load(os.path.join(self.root_dir, mask_path))
+
+        # Convert mask to 0-1 range
+        mask = ((mask - mask.min()) / (mask.max() - mask.min())).astype(np.uint8)
+
+        # Convert mask to format expected by ARI calc (H * W, # slots)
+        mask = torch.from_numpy(mask).squeeze(-1)
+        mask = torch.permute(torch.flatten(mask, start_dim=1, end_dim=2), (1, 0))
+        sample = {'image': image, 'mask': mask}
+        return sample
+
+    def __len__(self):
+        return len(self.files)
+
