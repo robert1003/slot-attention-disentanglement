@@ -22,8 +22,6 @@ def adjusted_rand_index(true_mask, pred_mask):
     """
     _, n_points, n_true_groups = true_mask.shape
     n_pred_groups = pred_mask.shape[-1]
-    print(true_mask.shape)
-    print(pred_mask.shape)
     if n_points <= n_true_groups and n_points <= n_pred_groups:
         # This rules out the n_true_groups == n_pred_groups == n_points
         # corner case, and also n_true_groups == n_pred_groups == 0, since
