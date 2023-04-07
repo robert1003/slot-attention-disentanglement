@@ -205,7 +205,7 @@ class SlotAttentionAutoEncoder(nn.Module):
         masks = nn.Softmax(dim=1)(masks)
         recon_combined = torch.sum(recons * masks, dim=1)  # Recombine image.
         recon_combined = recon_combined.permute(0,3,1,2)
-        # `recon_combined` has shape: [batch_size, width, height, num_channels].
+        # `recon_combined` has shape: [batch_size, num_channels, width, height].
 
         return recon_combined, recons, masks, slots_rep
 
@@ -220,7 +220,7 @@ class SlotAttentionProjection(SlotAttentionAutoEncoder):
 
     def forward(self, image, vis_step):
         recon_combined, recons, masks, slots = super().forward(image)
-        # `recon_combined` has shape: [batch_size, width, height, num_channels].
+        # `recon_combined` has shape: [batch_size, num_channels, width, height].
         # `recons` has shape: [batch_size, num_slots, width, height, num_channels].
         # `masks` has shape: [batch_size, num_slots, width, height, 1].
         # `slots` has shape: [batch_size, num_slots, slot_size].
