@@ -31,11 +31,16 @@ def main(opt):
         train_set = MultiDSprites(path=opt.dataset_path, split='train')
 
     if opt.base:
-        model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim).to(device)
+        model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss).to(device)
     else:
         model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0).to(device)
 
-    criterion = nn.MSELoss()
+    if opt.bce_loss:
+        # Assumes image is normalized to 0-1 range
+        criterion = nn.BCELoss()
+    else:
+        criterion = nn.MSELoss()
+
     params = [{'params': model.parameters()}]
     train_dataloader = torch.utils.data.DataLoader(train_set, batch_size=opt.batch_size,
                             shuffle=True, num_workers=opt.num_workers, pin_memory=True)
@@ -256,6 +261,7 @@ if __name__ == "__main__":
     parser.add_argument('--cov-div-sq', action='store_true', help='divide projection head covariance by the square of the number of projection dimensions')
     parser.add_argument('--slot-cov', action='store_true', help='calculate covariance over slots rather than over projection feature dimension')
     parser.add_argument('--cov-warmup', default=0, type=int, help='number of warmup steps for the covariance loss')
+    parser.add_argument('--bce-loss', action='store_true', help='calculate the reconstruction loss using binary cross entropy rather than mean squared error')
 
     main(parser.parse_args())
 
