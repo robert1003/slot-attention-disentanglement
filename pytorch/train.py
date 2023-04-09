@@ -239,7 +239,7 @@ def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_
     if 'mask' in sample:
         flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
         flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
-        vis_dict['ari'] = adjusted_rand_index(sample['mask'], flattened_masks).mean().item()
+        vis_dict['ari'] = adjusted_rand_index(sample['mask'].to(device), flattened_masks.to(device)).mean().item()
 
     return vis_dict
 
