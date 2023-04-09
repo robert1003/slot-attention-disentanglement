@@ -1,10 +1,10 @@
 """
-Multi-dSprites dataset reader. Convert tfrecords to a pickle format to remove tf dependency.
+Multi-dSprites dataset reader. Convert tfrecords to a numpy format to remove tf dependency.
 Largely taken from: https://github.com/deepmind/multi_object_datasets/blob/master/multi_dsprites.py
 Dataset downloaded from: https://console.cloud.google.com/storage/browser/multi-object-datasets/multi_dsprites
 
 Example usage:
-`python tfrecord_covert.py --infile ../multidsprite_color_on_grayscale.tfrecords --outfir ../data/multidsprite `
+`python tfrecord_covert.py --infile ../multidsprite_color_on_grayscale.tfrecords --outdir ../data/multidsprite `
 
 """
 
