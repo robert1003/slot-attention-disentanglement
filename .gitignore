@@ -24,4 +24,4 @@ dist/
 .idea/
 *.swp
 .DS_Store
-
+**/.ipynb_checkpoints/
