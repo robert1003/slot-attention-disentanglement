@@ -110,10 +110,13 @@ class MultiDSpritesGrayBackground(Dataset):
 
         # Convert mask to 0-1 range
         mask = ((mask - mask.min()) / (mask.max() - mask.min())).astype(np.uint8)
+        mask = torch.from_numpy(mask)
+
+        # Remove background mask (always the first mask), background labels not included in ARI
+        mask[0] = torch.zeros_like(mask[1])
 
         # Convert mask to format expected by ARI calc (H * W, # slots)
-        mask = torch.from_numpy(mask).squeeze(-1)
-        mask = torch.permute(torch.flatten(mask, start_dim=1, end_dim=2), (1, 0))
+        mask = torch.permute(torch.flatten(mask.squeeze(-1), start_dim=1, end_dim=2), (1, 0))
         sample = {'image': image, 'mask': mask}
         return sample
 
