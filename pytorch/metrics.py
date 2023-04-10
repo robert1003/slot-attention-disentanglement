@@ -56,9 +56,10 @@ def adjusted_rand_index(true_mask, pred_mask):
     # special-cased (to return 1) as the above formula gives a divide-by-zero.
     # This might not work when true_mask has values that do not sum to one:
 
-    both_single_cluster = torch.logical_and(
-    _all_equal(true_group_ids), _all_equal(pred_group_ids))
-    result = torch.where(both_single_cluster, torch.ones_like(ari), ari)
+    # both_single_cluster = torch.logical_and(
+    # _all_equal(true_group_ids), _all_equal(pred_group_ids))
+    # result = torch.where(both_single_cluster, torch.ones_like(ari), ari)
+    result = torch.where(_all_equal(true_group_ids), torch.ones_like(ari), ari)
     return result
 
 
