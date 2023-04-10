@@ -27,13 +27,16 @@ def main(opt):
     resolution = (128, 128)
 
     if opt.dataset == "clevr":
-        train_set = CLEVR(path=opt.dataset_path, split="train")
+        train_set = CLEVR(path=opt.dataset_path, split="train",
+                rescale=opt.dataset_rescale)
     elif opt.dataset == 'multid-gray':
         assert opt.num_slots == 6, "Invalid number of slots for MultiDSpritesGrayBackground"
-        train_set = MultiDSpritesGrayBackground(path=opt.dataset_path)
+        train_set = MultiDSpritesGrayBackground(path=opt.dataset_path,
+                rescale=opt.dataset_rescale)
         resolution = (64, 64)
     else:
-        train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots)
+        train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots,
+                rescale=opt.dataset_rescale)
 
     if opt.base:
         model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss).to(device)
@@ -131,6 +134,10 @@ def main(opt):
 
             vis_dict['loss'] = loss
             if vis_step:
+                if opt.dataset_rescale:
+                    recon_combined = (recon_combined + 1.) / 2.
+                    recons = (recons + 1.) / 2.
+
                 if not opt.base:
                     vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict)
                 else:
@@ -275,6 +282,7 @@ if __name__ == "__main__":
     parser.add_argument('--cov-warmup', default=0, type=int, help='number of warmup steps for the covariance loss')
     parser.add_argument('--bce-loss', action='store_true', help='calculate the reconstruction loss using binary cross entropy rather than mean squared error')
     parser.add_argument('--identity-proj', action='store_true', help='set projection to identity function. This option is equivalent to applying var/cov regularization on slot vectors directly')
+    parser.add_argument('--dataset-rescale', action='store_true', help='by default image is rescaled from [0,255] to [0,1]. This option enables rescale from [0,255] to [-1,1]. This option the one used in original Slot Attention paper')
 
     main(parser.parse_args())
 

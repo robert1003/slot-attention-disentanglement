@@ -33,15 +33,21 @@ class PARTNET(Dataset):
         return len(self.files)
 
 class CLEVR(Dataset):
-    def __init__(self, path, split='train'):
+    def __init__(self, path, split='train', rescale=False):
         super(CLEVR, self).__init__()
 
         assert split in ['train', 'val', 'test']
         self.split = split
         self.root_dir = os.path.join(path, split)
         self.files = os.listdir(self.root_dir)
-        self.img_transform = transforms.Compose([
-               transforms.ToTensor()])
+        if not rescale:
+            self.img_transform = transforms.Compose([
+                    transforms.ToTensor()])
+        else:
+            self.img_transform = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize(0.5, 0.5) # ([0,1]-0.5)/0.5=[-1,1]
+                ])
 
     def __getitem__(self, index):
         path = self.files[index]
@@ -56,7 +62,7 @@ class CLEVR(Dataset):
         return len(self.files)
 
 class MultiDSprites(Dataset):
-    def __init__(self, path='./data/multi_dsprites/processed', split='train', unique=True, num_slots = 6):
+    def __init__(self, path='./data/multi_dsprites/processed', split='train', unique=True, num_slots=6, rescale=False):
         super(MultiDSprites, self).__init__()
 
         assert split in ['train', 'val', 'test']
@@ -67,8 +73,14 @@ class MultiDSprites(Dataset):
             file_split + '_images_rand4_' + ('unique' if unique else '') + '.npy'))
         self.mask = np.load(os.path.join(path,
             file_split + '_masks_rand4_' + ('unique' if unique else '') + '.npy'))
-        self.img_transform = transforms.Compose([
-               transforms.ToTensor()])
+        if not rescale:
+            self.img_transform = transforms.Compose([
+                    transforms.ToTensor()])
+        else:
+            self.img_transform = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize(0.5, 0.5) # ([0,1]-0.5)/0.5=[-1,1]
+                ])
         self.num_slots = num_slots
 
     def __getitem__(self, index):
@@ -94,11 +106,18 @@ class MultiDSprites(Dataset):
 
 
 class MultiDSpritesGrayBackground(Dataset):
-    def __init__(self, path='./data/multi_dsprites/processed'):
+    def __init__(self, path='./data/multi_dsprites/processed', rescale=False):
         super(MultiDSpritesGrayBackground, self).__init__()
         self.root_dir = path
         self.files = [i for i in os.listdir(self.root_dir) if 'image' in i]
-        self.img_transform = transforms.Compose([transforms.ToTensor()])
+        if not rescale:
+            self.img_transform = transforms.Compose([
+                    transforms.ToTensor()])
+        else:
+            self.img_transform = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize(0.5, 0.5) # ([0,1]-0.5)/0.5=[-1,1]
+                ])
 
     def __getitem__(self, index):
         image_path = self.files[index]
