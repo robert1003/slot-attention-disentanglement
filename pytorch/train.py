@@ -13,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
 from PIL import Image as Image, ImageEnhance
 
+from metrics import adjusted_rand_index
 import torchvision
 
 import wandb
@@ -27,6 +28,10 @@ def main(opt):
 
     if opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train")
+    elif opt.dataset == 'multid-gray':
+        assert opt.num_slots == 6, "Invalid number of slots for MultiDSpritesGrayBackground"
+        train_set = MultiDSpritesGrayBackground(path=opt.dataset_path)
+        resolution = (64, 64)
     else:
         train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots)
 
@@ -127,9 +132,9 @@ def main(opt):
             vis_dict['loss'] = loss
             if vis_step:
                 if not opt.base:
-                    vis_dict = visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_loss_dict)
+                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict)
                 else:
-                    vis_dict = visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, None)
+                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, None)
             wandb.log(vis_dict, step=i)
             
             total_loss += loss.item()
@@ -174,8 +179,9 @@ def main(opt):
 
 
 
-def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_loss_dict):
+def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict):
     """Add visualizations to the dictionary to be logged with W&B"""
+    image = sample['image']
     if not opt.base:
         # Visualize projection space covariance matrix and feature std. dev. as heat maps
         # Resues proj_loss_dict from last step since model does not use projection head in eval
@@ -229,6 +235,12 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
         vis_dict['proj_out_norm'] = proj_loss_dict['proj_out_norm']
         vis_dict['proj_input_norm'] = proj_loss_dict['proj_input_norm']
 
+    # Visualize ARI performance
+    if 'mask' in sample:
+        flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
+        flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
+        vis_dict['ari'] = adjusted_rand_index(sample['mask'].to(device), flattened_masks.to(device)).mean().item()
+
     return vis_dict
 
 
@@ -248,7 +260,7 @@ if __name__ == "__main__":
     parser.add_argument('--decay_steps', default=100000, type=int, help='Number of steps for the learning rate decay.')
     parser.add_argument('--num_train_steps', default=500000, type=int, help='Number of training steps.')
     parser.add_argument('--num_workers', default=4, type=int, help='number of workers for loading data')
-    parser.add_argument('--dataset', choices=['clevr', 'multid'], help='dataset to train on')
+    parser.add_argument('--dataset', choices=['clevr', 'multid', 'multid-gray'], help='dataset to train on')
     parser.add_argument('--dataset_path', default="./data/CLEVR_v1.0/images", type=str, help='path to dataset')
     parser.add_argument('--proj_dim', default=1024, type=int, help='dimension of the projection space')
     parser.add_argument('--proj_weight', default=1.0, type=float, help='weight given to sum of projection head losses')
