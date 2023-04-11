@@ -14,11 +14,11 @@ class SlotAttention(nn.Module):
         self.scale = dim ** -0.5
 
         self.slots_mu = nn.Parameter(torch.randn(1, 1, dim))
-        self.slots_sigma = nn.Parameter(torch.rand(1, 1, dim))
+        self.slots_log_sigma = nn.Parameter(torch.rand(1, 1, dim))
 
-        self.to_q = nn.Linear(dim, dim)
-        self.to_k = nn.Linear(dim, dim)
-        self.to_v = nn.Linear(dim, dim)
+        self.to_q = nn.Linear(dim, dim, bias=False)
+        self.to_k = nn.Linear(dim, dim, bias=False)
+        self.to_v = nn.Linear(dim, dim, bias=False)
 
         self.gru = nn.GRUCell(dim, dim)
 
@@ -27,17 +27,17 @@ class SlotAttention(nn.Module):
         self.fc1 = nn.Linear(dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, dim)
 
-        self.norm_input  = nn.LayerNorm(dim)
-        self.norm_slots  = nn.LayerNorm(dim)
-        self.norm_pre_ff = nn.LayerNorm(dim)
+        # tf.LayerNormalization uses eps=0.001
+        self.norm_input  = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
+        self.norm_slots  = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
+        self.norm_pre_ff = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
 
     def forward(self, inputs, num_slots = None):
         b, n, d = inputs.shape
         n_s = num_slots if num_slots is not None else self.num_slots
         
         mu = self.slots_mu.expand(b, n_s, -1)
-        sigma = self.slots_sigma.expand(b, n_s, -1)
-        # slots = torch.normal(mu, sigma)
+        sigma = torch.exp(self.slots_log_sigma).expand(b, n_s, -1)
         slots = mu + torch.normal(mean=0, std=1, size=sigma.shape).to(device) * sigma
 
         inputs = self.norm_input(inputs)        
@@ -167,6 +167,7 @@ class SlotAttentionAutoEncoder(nn.Module):
         self.fc1 = nn.Linear(hid_dim, hid_dim)
         self.fc2 = nn.Linear(hid_dim, hid_dim)
 
+        self.encoder_layer_norm = nn.LayerNorm(hid_dim, elementwise_affine=True, eps=0.001)
         self.slot_attention = SlotAttention(
             num_slots=self.num_slots,
             dim=hid_dim,
@@ -179,7 +180,8 @@ class SlotAttentionAutoEncoder(nn.Module):
 
         # Convolutional encoder with position embedding.
         x = self.encoder_cnn(image)  # CNN Backbone.
-        x = nn.LayerNorm(x.shape[1:]).to(device)(x)
+        #x = nn.LayerNorm(x.shape[1:]).to(device)(x)
+        x = self.encoder_layer_norm(x)
         x = self.fc1(x)
         x = F.relu(x)
         x = self.fc2(x)  # Feedforward network on set.
