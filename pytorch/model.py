@@ -14,11 +14,11 @@ class SlotAttention(nn.Module):
         self.scale = dim ** -0.5
 
         self.slots_mu = nn.Parameter(torch.randn(1, 1, dim))
-        self.slots_sigma = nn.Parameter(torch.rand(1, 1, dim))
+        self.slots_log_sigma = nn.Parameter(torch.rand(1, 1, dim))
 
-        self.to_q = nn.Linear(dim, dim)
-        self.to_k = nn.Linear(dim, dim)
-        self.to_v = nn.Linear(dim, dim)
+        self.to_q = nn.Linear(dim, dim, bias=False)
+        self.to_k = nn.Linear(dim, dim, bias=False)
+        self.to_v = nn.Linear(dim, dim, bias=False)
 
         self.gru = nn.GRUCell(dim, dim)
 
@@ -27,17 +27,17 @@ class SlotAttention(nn.Module):
         self.fc1 = nn.Linear(dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, dim)
 
-        self.norm_input  = nn.LayerNorm(dim)
-        self.norm_slots  = nn.LayerNorm(dim)
-        self.norm_pre_ff = nn.LayerNorm(dim)
+        # tf.LayerNormalization uses eps=0.001
+        self.norm_input  = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
+        self.norm_slots  = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
+        self.norm_pre_ff = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
 
     def forward(self, inputs, num_slots = None):
         b, n, d = inputs.shape
         n_s = num_slots if num_slots is not None else self.num_slots
         
         mu = self.slots_mu.expand(b, n_s, -1)
-        sigma = self.slots_sigma.expand(b, n_s, -1)
-        # slots = torch.normal(mu, sigma)
+        sigma = torch.exp(self.slots_log_sigma).expand(b, n_s, -1)
         slots = mu + torch.normal(mean=0, std=1, size=sigma.shape).to(device) * sigma
 
         inputs = self.norm_input(inputs)        
@@ -127,6 +127,11 @@ class Decoder(nn.Module):
         self.resolution = resolution
 
     def forward(self, x):
+        # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
+        x = x.reshape((-1, x.shape[-1])).unsqueeze(1).unsqueeze(2)
+        x = x.repeat((1, self.decoder_initial_size[0], self.decoder_initial_size[1], 1))
+
+        # Apply decoder
         x = self.decoder_pos(x)
         x = x.permute(0,3,1,2)
         x = self.conv1(x)
@@ -144,10 +149,45 @@ class Decoder(nn.Module):
         x = x[:,:,:self.resolution[0], :self.resolution[1]]
         x = x.permute(0,2,3,1)
         return x
+    
+
+class MDSpritesDecoder(nn.Module):
+    """Slot Attention paper, Appendix E.3 (page 24)"""
+    def __init__(self, hid_dim, resolution):
+        super().__init__()
+        self.conv1 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(1, 1), padding=2).to(device)
+        self.conv2 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(1, 1), padding=2).to(device)
+        self.conv3 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(1, 1), padding=2).to(device)
+        self.conv4 = nn.ConvTranspose2d(hid_dim, 4, 3, stride=(1, 1), padding=1).to(device)
+        self.decoder_initial_size = resolution
+        self.decoder_pos = SoftPositionEmbed(hid_dim, self.decoder_initial_size)
+        self.resolution = resolution
+
+    def forward(self, x):
+        # Spatial broadcast operation
+        x = x.reshape((-1, x.shape[-1])).unsqueeze(1).unsqueeze(2)
+        x = x.repeat((1, self.decoder_initial_size[0], self.decoder_initial_size[1], 1))
+
+        # Apply decoder
+        x = self.decoder_pos(x)
+        x = x.permute(0,3,1,2)
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = self.conv3(x)
+        x = F.relu(x)
+        x = self.conv4(x)
+
+        # Split channels
+        x = x[:,:,:self.resolution[0], :self.resolution[1]]
+        x = x.permute(0,2,3,1)
+        return x
+
 
 """Slot Attention-based auto-encoder for object discovery."""
 class SlotAttentionAutoEncoder(nn.Module):
-    def __init__(self, resolution, num_slots, num_iterations, hid_dim, sigmoid=False):
+    def __init__(self, resolution, num_slots, num_iterations, hid_dim, sigmoid=False, mdsprites=True):
         """Builds the Slot Attention-based auto-encoder.
         Args:
         resolution: Tuple of integers specifying width and height of input image.
@@ -162,11 +202,15 @@ class SlotAttentionAutoEncoder(nn.Module):
         self.sigmoid = sigmoid
 
         self.encoder_cnn = Encoder(self.resolution, self.hid_dim)
-        self.decoder_cnn = Decoder(self.hid_dim, self.resolution)
+        if mdsprites:
+            self.decoder_cnn = MDSpritesDecoder(self.hid_dim, self.resolution)
+        else:
+            self.decoder_cnn = Decoder(self.hid_dim, self.resolution)
 
         self.fc1 = nn.Linear(hid_dim, hid_dim)
         self.fc2 = nn.Linear(hid_dim, hid_dim)
 
+        self.encoder_layer_norm = nn.LayerNorm(hid_dim, elementwise_affine=True, eps=0.001)
         self.slot_attention = SlotAttention(
             num_slots=self.num_slots,
             dim=hid_dim,
@@ -179,7 +223,8 @@ class SlotAttentionAutoEncoder(nn.Module):
 
         # Convolutional encoder with position embedding.
         x = self.encoder_cnn(image)  # CNN Backbone.
-        x = nn.LayerNorm(x.shape[1:]).to(device)(x)
+        #x = nn.LayerNorm(x.shape[1:]).to(device)(x)
+        x = self.encoder_layer_norm(x)
         x = self.fc1(x)
         x = F.relu(x)
         x = self.fc2(x)  # Feedforward network on set.
@@ -188,13 +233,9 @@ class SlotAttentionAutoEncoder(nn.Module):
         # Slot Attention module.
         slots_rep = self.slot_attention(x)
         # `slots_rep` has shape: [batch_size, num_slots, slot_size].
-
-        # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
-        slots = slots_rep.reshape((-1, slots_rep.shape[-1])).unsqueeze(1).unsqueeze(2)
-        slots = slots.repeat((1, 8, 8, 1))
         
         # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
-        x = self.decoder_cnn(slots)
+        x = self.decoder_cnn(slots_rep)
         # `x` has shape: [batch_size*num_slots, width, height, num_channels+1].
 
         # Undo combination of slot and batch dimension; split alpha masks.
@@ -218,8 +259,8 @@ class SlotAttentionAutoEncoder(nn.Module):
 
 
 class SlotAttentionProjection(SlotAttentionAutoEncoder):
-    def __init__(self, resolution, opt, vis=False):
-        super().__init__(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss)
+    def __init__(self, resolution, opt, vis=False, mdsprites=True):
+        super().__init__(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss, mdsprites=mdsprites)
 
         self.projection_head = ProjectionHead(opt, vis=vis)
 

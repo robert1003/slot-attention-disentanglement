@@ -29,19 +29,22 @@ def main(opt):
     if opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train",
                 rescale=opt.dataset_rescale)
+        mdsprites = False
     elif opt.dataset == 'multid-gray':
         assert opt.num_slots == 6, "Invalid number of slots for MultiDSpritesGrayBackground"
         train_set = MultiDSpritesGrayBackground(path=opt.dataset_path,
                 rescale=opt.dataset_rescale)
         resolution = (64, 64)
+        mdsprites = True
     else:
         train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots,
                 rescale=opt.dataset_rescale)
+        mdsprites = True
 
     if opt.base:
-        model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss).to(device)
+        model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss, mdsprites=mdsprites).to(device)
     else:
-        model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0).to(device)
+        model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0, mdsprites=mdsprites).to(device)
 
     if opt.bce_loss:
         # Assumes image is normalized to 0-1 range
@@ -256,7 +259,6 @@ def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_dir', default='./tmp/model10.ckpt', type=str, help='where to save models' )
-    parser.add_argument('--seed', default=0, type=int, help='random seed')
     parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--num_slots', default=7, type=int, help='Number of slots in Slot Attention.')
     parser.add_argument('--num_iterations', default=3, type=int, help='Number of attention iterations.')
