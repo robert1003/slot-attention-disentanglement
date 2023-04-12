@@ -34,6 +34,7 @@ def main(opt):
         model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0, mdsprites=mdsprites).to(device)
 
     test_dataloader = torch.utils.data.DataLoader(test_set, batch_size=opt.batch_size, shuffle=False, num_workers=opt.num_workers, pin_memory=True)
+    print('Evaluating on', len(test_set), 'test samples')
 
     ckpt = torch.load(opt.model_dir)
     model.load_state_dict(ckpt['model_state_dict'])
