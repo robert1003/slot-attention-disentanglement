@@ -106,7 +106,7 @@ class MultiDSprites(Dataset):
         return len(self.data)
 
 '''
-object num is 1-4
+object num is 2-5
 '''
 class MultiDSpritesGrayBackground(Dataset):
     def __init__(self, path='./data/multi_dsprites/processed', rescale=False):

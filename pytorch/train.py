@@ -37,6 +37,7 @@ def main(opt):
         resolution = (64, 64)
         mdsprites = True
     else:
+        assert opt.num_slots == 5, "Invalid number of slots for MultiDSpritesColorBackground"
         train_set = MultiDSpritesColorBackground(path=opt.dataset_path,
                 rescale=opt.dataset_rescale)
         resolution = (64, 64)
