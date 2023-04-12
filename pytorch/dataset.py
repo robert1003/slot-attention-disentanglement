@@ -150,7 +150,7 @@ object num is 1-4
 '''
 class MultiDSpritesColorBackground(Dataset):
     def __init__(self, path='./data/multi_dsprites/processed', rescale=False):
-        super(MultiDSpritesGrayBackground, self).__init__()
+        super(MultiDSpritesColorBackground, self).__init__()
         self.root_dir = path
         self.files = [i for i in os.listdir(self.root_dir) if 'image' in i]
         if not rescale:

@@ -37,8 +37,9 @@ def main(opt):
         resolution = (64, 64)
         mdsprites = True
     else:
-        train_set = MultiDSpritesColorBackground(path=opt.dataset_path, split='train', num_slots=opt.num_slots,
+        train_set = MultiDSpritesColorBackground(path=opt.dataset_path,
                 rescale=opt.dataset_rescale)
+        resolution = (64, 64)
         mdsprites = True
 
     if opt.base:
