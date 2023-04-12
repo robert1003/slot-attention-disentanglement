@@ -34,7 +34,6 @@ def main(opt):
         model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0, mdsprites=mdsprites).to(device)
 
     test_dataloader = torch.utils.data.DataLoader(test_set, batch_size=opt.batch_size, shuffle=False, num_workers=opt.num_workers, pin_memory=True)
-    print('Evaluating on', len(test_set), 'test samples')
 
     ckpt = torch.load(opt.model_dir)
     model.load_state_dict(ckpt['model_state_dict'])
@@ -60,7 +59,7 @@ def main(opt):
     print('NaN:', torch.isnan(ari).sum().item(), '/', ari.shape[0])
     ari = ari[~torch.isnan(ari)]
 
-    print('ARI on first 320 of train dataset', ari.mean().item())
+    print('ARI on {} samples: {}'.format(len(test_set), ari.mean().item()))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
