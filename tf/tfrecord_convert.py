@@ -106,20 +106,27 @@ if __name__ == "__main__":
     parser.add_argument('--infile', type=str, help='input tfrecords file')
     parser.add_argument('--outdir', type=str, help='directory to store pickled files' )
     parser.add_argument('--type', default='colored_on_grayscale', type=str, help='directory to store pickled files' )
-    parser.add_argument('--stop-idx', default='60000', type=int, help='number of records to convert' )
+    parser.add_argument('--start-idx', default='0', type=int, help='number of records to skip')
+    parser.add_argument('--num', default='60000', type=int, help='number of records to convert after start-idx')
     args = parser.parse_args()
 
     # Convert tfrecords file to a numpy image and mask files
     raw_dataset = dataset(args.infile, args.type)
+    print(f'converting examples from {args.start_idx} to {args.start_idx+args.num-1}')
+
+    cnt = 0
     for idx, raw_record in enumerate(raw_dataset):
-        if idx >= args.stop_idx:
+        if idx < args.start_idx:
+            continue
+        if idx >= args.start_idx + args.num:
             break
 
         np.save(os.path.join(args.outdir, str(idx) + "_image.npy"), raw_record['image'].numpy())
         np.save(os.path.join(args.outdir, str(idx) + "_mask.npy"), raw_record['mask'].numpy())
+        cnt += 1
 
-        if idx % 10000 == 0:
-            print(f"Record {idx}...")
+        if cnt % 10000 == 0:
+            print(f"Record {args.start_idx + cnt}...")
 
 
 

@@ -10,18 +10,22 @@ def main(opt):
     resolution = (128, 128)
 
     if opt.dataset == "clevr":
-        train_set = CLEVR(path=opt.dataset_path, split="train",
+        test_set = CLEVR(path=opt.dataset_path, split="test",
                 rescale=opt.dataset_rescale)
         mdsprites = False
     elif opt.dataset == 'multid-gray':
         assert opt.num_slots == 6, "Invalid number of slots for MultiDSpritesGrayBackground"
-        train_set = MultiDSpritesGrayBackground(path=opt.dataset_path,
+        assert "test" in opt.dataset_path
+        test_set = MultiDSpritesGrayBackground(path=opt.dataset_path,
                 rescale=opt.dataset_rescale)
         resolution = (64, 64)
         mdsprites = True
     else:
-        train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots,
+        assert opt.num_slots == 5, "Invalid number of slots for MultiDSpritesColorBackground"
+        assert "test" in opt.dataset_path
+        test_set = MultiDSpritesColorBackground(path=opt.dataset_path,
                 rescale=opt.dataset_rescale)
+        resolution = (64, 64)
         mdsprites = True
 
     if opt.base:
@@ -29,7 +33,6 @@ def main(opt):
     else:
         model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0, mdsprites=mdsprites).to(device)
 
-    test_set = torch.utils.data.Subset(train_set, torch.arange(0, 320))
     test_dataloader = torch.utils.data.DataLoader(test_set, batch_size=opt.batch_size, shuffle=False, num_workers=opt.num_workers, pin_memory=True)
 
     ckpt = torch.load(opt.model_dir)
