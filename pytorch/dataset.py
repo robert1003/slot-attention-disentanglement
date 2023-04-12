@@ -183,3 +183,4 @@ class MultiDSpritesColorBackground(Dataset):
         return sample
 
     def __len__(self):
+        return len(self.files)
