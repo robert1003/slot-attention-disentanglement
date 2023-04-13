@@ -13,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
 from PIL import Image as Image, ImageEnhance
 
+from metrics import adjusted_rand_index
 import torchvision
 
 import wandb
@@ -31,11 +32,25 @@ def main(opt):
         train_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, split='train', resolution=resolution)
     elif opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train")
+    elif opt.dataset == "clevr":
+        train_set = CLEVR(path=opt.dataset_path, split="train",
+                rescale=opt.dataset_rescale)
+        mdsprites = False
+    elif opt.dataset == 'multid-gray':
+        assert opt.num_slots == 6, "Invalid number of slots for MultiDSpritesGrayBackground"
+        train_set = MultiDSpritesGrayBackground(path=opt.dataset_path,
+                rescale=opt.dataset_rescale)
+        resolution = (64, 64)
+        mdsprites = True
     else:
-        train_set = MultiDSprites(path=opt.dataset_path, split='train')
+        assert opt.num_slots == 5, "Invalid number of slots for MultiDSpritesColorBackground"
+        train_set = MultiDSpritesColorBackground(path=opt.dataset_path,
+                rescale=opt.dataset_rescale)
+        resolution = (64, 64)
+        mdsprites = True
 
     if opt.base:
-        model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim).to(device)
+        model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss, mdsprites=mdsprites).to(device)
     elif opt.dinosaur:
         # Hidden dimension must be dimension of ViT encoding for each token
         hid_dim = 768
@@ -43,11 +58,14 @@ def main(opt):
                                         opt.proj_dim, std_target=opt.std_target, vis=opt.vis_freq > 0, 
                                         cov_div_square=opt.cov_div_sq).to(device)
     else:
-        model = SlotAttentionProjection(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, 
-                                        opt.proj_dim, std_target=opt.std_target, vis=opt.vis_freq > 0, 
-                                        cov_div_square=opt.cov_div_sq).to(device)
+        model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0, mdsprites=mdsprites).to(device)
 
-    criterion = nn.MSELoss()
+    if opt.bce_loss:
+        # Assumes image is normalized to 0-1 range
+        criterion = nn.BCELoss()
+    else:
+        criterion = nn.MSELoss()
+
     params = [{'params': model.parameters()}]
     train_dataloader = torch.utils.data.DataLoader(train_set, batch_size=opt.batch_size,
                             shuffle=True, num_workers=opt.num_workers, pin_memory=True)
@@ -93,6 +111,11 @@ def main(opt):
             optimizer.param_groups[0]['lr'] = learning_rate
             image = sample['image'].to(device)
             vis_dict['learning_rate'] = learning_rate
+
+            if i < opt.cov_warmup:
+                cov_weight = opt.cov_weight * (i / opt.cov_warmup)
+            else:
+                cov_weight = opt.cov_weight
             
             if opt.base:
                 recon_combined, recons, masks, slots = model(image)
@@ -103,7 +126,7 @@ def main(opt):
                     recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, image, vis_step)
                 else:
                     recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
-                proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + opt.cov_weight * proj_loss_dict["cov_loss"]
+                proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + cov_weight * proj_loss_dict["cov_loss"]
                 recon_loss = criterion(recon_combined, image)
                 proj_loss *= opt.proj_weight
                 loss = recon_loss + proj_loss
@@ -111,11 +134,15 @@ def main(opt):
                 vis_dict['std_loss'] = proj_loss_dict['std_loss'].item()
                 vis_dict['cov_loss'] = proj_loss_dict['cov_loss'].item()
 
+                # Visualize covariance loss with all weighting to make hyperparameter tuning easier
+                vis_dict['weighted_cov_loss'] = opt.proj_weight * cov_weight * proj_loss_dict["cov_loss"]
+
                 # Basic visualization of distribution of slot initializations in Slot Attn. module
                 vis_dict['slot_sample_mean'] = torch.mean(model.slot_attention.slots_mu).item()
-                vis_dict['slot_sample_std'] = torch.mean(model.slot_attention.slots_sigma).item()
+                vis_dict['slot_sample_std'] = torch.mean(model.slot_attention.slots_log_sigma).item()
 
-                # Visualize the mean of the per-dimension means of slot projections
+                # Visualize the mean of the per-dimension means of slot projections 
+                # (mean of per-slot means for covariance over slots setting)
                 vis_dict['avg_proj_dim_mean'] = proj_loss_dict['proj_mean']
 
                 # Visualize influence of reconstruction loss vs. projection head losses
@@ -128,10 +155,14 @@ def main(opt):
 
             vis_dict['loss'] = loss
             if vis_step:
+                if opt.dataset_rescale:
+                    recon_combined = (recon_combined + 1.) / 2.
+                    recons = (recons + 1.) / 2.
+
                 if not opt.base:
-                    vis_dict = visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_loss_dict)
+                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict)
                 else:
-                    vis_dict = visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, None)
+                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, None)
             wandb.log(vis_dict, step=i)
             
             total_loss += loss.item()
@@ -176,19 +207,28 @@ def main(opt):
 
 
 
-def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_loss_dict):
+def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict):
     """Add visualizations to the dictionary to be logged with W&B"""
+    image = sample['image']
     if not opt.base:
         # Visualize projection space covariance matrix and feature std. dev. as heat maps
         # Resues proj_loss_dict from last step since model does not use projection head in eval
         plt.figure(figsize=(10,10))
-        plt.imshow(proj_loss_dict['cov_mx'], cmap='Blues')
+        if opt.slot_cov:
+            # When calculating slot covariance, generate a cov. matrix for each image in the batch.
+            # Just sum over batch dimension here to get a matrix we can visualize
+            plt.imshow(torch.sum(proj_loss_dict['cov_mx'], dim=0), cmap='Blues')
+        else:
+            plt.imshow(proj_loss_dict['cov_mx'], cmap='Blues')
         plt.colorbar()
         vis_dict['cov'] = wandb.Image(plt)
         plt.close()
 
         plt.figure(figsize=(10,10))
-        plt.imshow(proj_loss_dict['std_vec'].unsqueeze(1).repeat((1, 50)), cmap='Blues')
+        if opt.slot_cov:
+            plt.imshow(proj_loss_dict['std_vec'].flatten().unsqueeze(1).repeat((1, 50)), cmap='Blues')
+        else:
+            plt.imshow(proj_loss_dict['std_vec'].unsqueeze(1).repeat((1, 50)), cmap='Blues')
         plt.colorbar()
         vis_dict['std'] = wandb.Image(plt)
         plt.close()
@@ -223,6 +263,12 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
         vis_dict['proj_out_norm'] = proj_loss_dict['proj_out_norm']
         vis_dict['proj_input_norm'] = proj_loss_dict['proj_input_norm']
 
+    # Visualize ARI performance
+    if 'mask' in sample:
+        flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
+        flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
+        vis_dict['ari'] = adjusted_rand_index(sample['mask'].to(device), flattened_masks.to(device)).mean().item()
+
     return vis_dict
 
 
@@ -231,7 +277,6 @@ def visualize(vis_dict, opt, image, recon_combined, recons, masks, slots, proj_l
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_dir', default='./tmp/model10.ckpt', type=str, help='where to save models' )
-    parser.add_argument('--seed', default=0, type=int, help='random seed')
     parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--num_slots', default=7, type=int, help='Number of slots in Slot Attention.')
     parser.add_argument('--num_iterations', default=3, type=int, help='Number of attention iterations.')
@@ -242,7 +287,7 @@ if __name__ == "__main__":
     parser.add_argument('--decay_steps', default=100000, type=int, help='Number of steps for the learning rate decay.')
     parser.add_argument('--num_train_steps', default=500000, type=int, help='Number of training steps.')
     parser.add_argument('--num_workers', default=4, type=int, help='number of workers for loading data')
-    parser.add_argument('--dataset', choices=['clevr', 'multid'], help='dataset to train on')
+    parser.add_argument('--dataset', choices=['clevr', 'multid', 'multid-gray'], help='dataset to train on')
     parser.add_argument('--dataset_path', default="./data/CLEVR_v1.0/images", type=str, help='path to dataset')
     parser.add_argument('--proj_dim', default=1024, type=int, help='dimension of the projection space')
     parser.add_argument('--proj_weight', default=1.0, type=float, help='weight given to sum of projection head losses')
@@ -253,6 +298,11 @@ if __name__ == "__main__":
     parser.add_argument('--store_freq', default=10000, type=int, help='frequency at which to save model (in steps)')
     parser.add_argument('--std_target', default=1.0, type=float, help='target std. deviation for each projection space dimension')
     parser.add_argument('--cov-div-sq', action='store_true', help='divide projection head covariance by the square of the number of projection dimensions')
+    parser.add_argument('--slot-cov', action='store_true', help='calculate covariance over slots rather than over projection feature dimension')
+    parser.add_argument('--cov-warmup', default=0, type=int, help='number of warmup steps for the covariance loss')
+    parser.add_argument('--bce-loss', action='store_true', help='calculate the reconstruction loss using binary cross entropy rather than mean squared error')
+    parser.add_argument('--identity-proj', action='store_true', help='set projection to identity function. This option is equivalent to applying var/cov regularization on slot vectors directly')
+    parser.add_argument('--dataset-rescale', action='store_true', help='by default image is rescaled from [0,255] to [0,1]. This option enables rescale from [0,255] to [-1,1]. This option the one used in original Slot Attention paper')
     parser.add_argument('--dinosaur', action='store_true', help='run projection head SA on top of frozen ViT embeddings')
     parser.add_argument('--embed_path', default="./data/coco/embedding", type=str, help='path to pre-generated COCO 2017 embeddings')
 

@@ -14,11 +14,11 @@ class SlotAttention(nn.Module):
         self.scale = dim ** -0.5
 
         self.slots_mu = nn.Parameter(torch.randn(1, 1, dim))
-        self.slots_sigma = nn.Parameter(torch.rand(1, 1, dim))
+        self.slots_log_sigma = nn.Parameter(torch.rand(1, 1, dim))
 
-        self.to_q = nn.Linear(dim, dim)
-        self.to_k = nn.Linear(dim, dim)
-        self.to_v = nn.Linear(dim, dim)
+        self.to_q = nn.Linear(dim, dim, bias=False)
+        self.to_k = nn.Linear(dim, dim, bias=False)
+        self.to_v = nn.Linear(dim, dim, bias=False)
 
         self.gru = nn.GRUCell(dim, dim)
 
@@ -27,17 +27,17 @@ class SlotAttention(nn.Module):
         self.fc1 = nn.Linear(dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, dim)
 
-        self.norm_input  = nn.LayerNorm(dim)
-        self.norm_slots  = nn.LayerNorm(dim)
-        self.norm_pre_ff = nn.LayerNorm(dim)
+        # tf.LayerNormalization uses eps=0.001
+        self.norm_input  = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
+        self.norm_slots  = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
+        self.norm_pre_ff = nn.LayerNorm(dim, eps=0.001, elementwise_affine=True)
 
     def forward(self, inputs, num_slots = None):
         b, n, d = inputs.shape
         n_s = num_slots if num_slots is not None else self.num_slots
         
         mu = self.slots_mu.expand(b, n_s, -1)
-        sigma = self.slots_sigma.expand(b, n_s, -1)
-        # slots = torch.normal(mu, sigma)
+        sigma = torch.exp(self.slots_log_sigma).expand(b, n_s, -1)
         slots = mu + torch.normal(mean=0, std=1, size=sigma.shape).to(device) * sigma
 
         inputs = self.norm_input(inputs)        
@@ -127,6 +127,11 @@ class Decoder(nn.Module):
         self.resolution = resolution
 
     def forward(self, x):
+        # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
+        x = x.reshape((-1, x.shape[-1])).unsqueeze(1).unsqueeze(2)
+        x = x.repeat((1, self.decoder_initial_size[0], self.decoder_initial_size[1], 1))
+
+        # Apply decoder
         x = self.decoder_pos(x)
         x = x.permute(0,3,1,2)
         x = self.conv1(x)
@@ -144,10 +149,45 @@ class Decoder(nn.Module):
         x = x[:,:,:self.resolution[0], :self.resolution[1]]
         x = x.permute(0,2,3,1)
         return x
+    
+
+class MDSpritesDecoder(nn.Module):
+    """Slot Attention paper, Appendix E.3 (page 24)"""
+    def __init__(self, hid_dim, resolution):
+        super().__init__()
+        self.conv1 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(1, 1), padding=2).to(device)
+        self.conv2 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(1, 1), padding=2).to(device)
+        self.conv3 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(1, 1), padding=2).to(device)
+        self.conv4 = nn.ConvTranspose2d(hid_dim, 4, 3, stride=(1, 1), padding=1).to(device)
+        self.decoder_initial_size = resolution
+        self.decoder_pos = SoftPositionEmbed(hid_dim, self.decoder_initial_size)
+        self.resolution = resolution
+
+    def forward(self, x):
+        # Spatial broadcast operation
+        x = x.reshape((-1, x.shape[-1])).unsqueeze(1).unsqueeze(2)
+        x = x.repeat((1, self.decoder_initial_size[0], self.decoder_initial_size[1], 1))
+
+        # Apply decoder
+        x = self.decoder_pos(x)
+        x = x.permute(0,3,1,2)
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = self.conv3(x)
+        x = F.relu(x)
+        x = self.conv4(x)
+
+        # Split channels
+        x = x[:,:,:self.resolution[0], :self.resolution[1]]
+        x = x.permute(0,2,3,1)
+        return x
+
 
 """Slot Attention-based auto-encoder for object discovery."""
 class SlotAttentionAutoEncoder(nn.Module):
-    def __init__(self, resolution, num_slots, num_iterations, hid_dim):
+    def __init__(self, resolution, num_slots, num_iterations, hid_dim, sigmoid=False, mdsprites=True):
         """Builds the Slot Attention-based auto-encoder.
         Args:
         resolution: Tuple of integers specifying width and height of input image.
@@ -159,13 +199,18 @@ class SlotAttentionAutoEncoder(nn.Module):
         self.resolution = resolution
         self.num_slots = num_slots
         self.num_iterations = num_iterations
+        self.sigmoid = sigmoid
 
         self.encoder_cnn = Encoder(self.resolution, self.hid_dim)
-        self.decoder_cnn = Decoder(self.hid_dim, self.resolution)
+        if mdsprites:
+            self.decoder_cnn = MDSpritesDecoder(self.hid_dim, self.resolution)
+        else:
+            self.decoder_cnn = Decoder(self.hid_dim, self.resolution)
 
         self.fc1 = nn.Linear(hid_dim, hid_dim)
         self.fc2 = nn.Linear(hid_dim, hid_dim)
 
+        self.encoder_layer_norm = nn.LayerNorm(hid_dim, elementwise_affine=True, eps=0.001)
         self.slot_attention = SlotAttention(
             num_slots=self.num_slots,
             dim=hid_dim,
@@ -180,7 +225,8 @@ class SlotAttentionAutoEncoder(nn.Module):
 
         # Convolutional encoder with position embedding.
         x = self.encoder_cnn(image)  # CNN Backbone.
-        x = nn.LayerNorm(x.shape[1:]).to(device)(x)
+        #x = nn.LayerNorm(x.shape[1:]).to(device)(x)
+        x = self.encoder_layer_norm(x)
         x = self.fc1(x)
         x = F.relu(x)
         x = self.fc2(x)  # Feedforward network on set.
@@ -192,13 +238,9 @@ class SlotAttentionAutoEncoder(nn.Module):
         # Slot Attention module.
         slots_rep = self.slot_attention(x)
         # `slots_rep` has shape: [batch_size, num_slots, slot_size].
-
-        # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
-        slots = slots_rep.reshape((-1, slots_rep.shape[-1])).unsqueeze(1).unsqueeze(2)
-        slots = slots.repeat((1, self.height_init, self.width_init, 1))
         
         # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
-        x = self.decoder_cnn(slots)
+        x = self.decoder_cnn(slots_rep)
         # `x` has shape: [batch_size*num_slots, width, height, num_channels+1].
 
         # Undo combination of slot and batch dimension; split alpha masks.
@@ -210,7 +252,11 @@ class SlotAttentionAutoEncoder(nn.Module):
         masks = nn.Softmax(dim=1)(masks)
         recon_combined = torch.sum(recons * masks, dim=1)  # Recombine image.
         recon_combined = recon_combined.permute(0,3,1,2)
-        # `recon_combined` has shape: [batch_size, width, height, num_channels].
+        # `recon_combined` has shape: [batch_size, num_channels, width, height].
+
+        if self.sigmoid:
+            # Normalize reconstruction to 0-1 range
+            recon_combined = torch.nn.functional.sigmoid(recon_combined)
 
         return recon_combined, recons, masks, slots_rep
 
@@ -218,14 +264,14 @@ class SlotAttentionAutoEncoder(nn.Module):
 
 
 class SlotAttentionProjection(SlotAttentionAutoEncoder):
-    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis=False, cov_div_square=False):
-        super().__init__(resolution, num_slots, num_iterations, hid_dim)
+    def __init__(self, resolution, opt, vis=False, mdsprites=True):
+        super().__init__(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss, mdsprites=mdsprites)
 
-        self.projection_head = ProjectionHead(num_slots, hid_dim, proj_dim, std_target, vis=vis, cov_div_square=cov_div_square)
+        self.projection_head = ProjectionHead(opt, vis=vis)
 
     def forward(self, image, vis_step):
         recon_combined, recons, masks, slots = super().forward(image)
-        # `recon_combined` has shape: [batch_size, width, height, num_channels].
+        # `recon_combined` has shape: [batch_size, num_channels, width, height].
         # `recons` has shape: [batch_size, num_slots, width, height, num_channels].
         # `masks` has shape: [batch_size, num_slots, width, height, 1].
         # `slots` has shape: [batch_size, num_slots, slot_size].
@@ -241,66 +287,105 @@ class SlotAttentionProjection(SlotAttentionAutoEncoder):
 
 
 class ProjectionHead(nn.Module):
-    def __init__(self, num_slots, hid_dim, projection_dim, std_target, epsilon=0.0001, vis=False, cov_div_square=False) -> None:
+    def __init__(self, opt, epsilon=0.0001, vis=False):
         super().__init__()
 
-        self.proj_dim = projection_dim
-        self.gamma = std_target
+        self.proj_dim = opt.proj_dim
+        self.gamma = opt.std_target
         self.eps = epsilon      # small constant for numerical stability
         self.vis = vis
+        self.cov_over_slots = opt.slot_cov
 
-        if cov_div_square:
+        if opt.cov_div_sq:
             self.cov_div = self.proj_dim**2
         else:
             self.cov_div = self.proj_dim
 
         # VICReg paper, Section 4.2. Two FC layers with non-linearities and a final linear layer
-        self.projector = nn.Sequential(
-            nn.Linear(hid_dim, projection_dim),
-            nn.BatchNorm1d(num_slots),
-            nn.ReLU(),
-            nn.Linear(projection_dim, projection_dim),
-            nn.BatchNorm1d(num_slots),
-            nn.ReLU(),
-            nn.Linear(projection_dim, projection_dim)
-        )
+        if not opt.identity_proj:
+            self.projector = nn.Sequential(
+                nn.Linear(opt.hid_dim, opt.proj_dim),
+                nn.BatchNorm1d(opt.num_slots),
+                nn.ReLU(),
+                nn.Linear(opt.proj_dim, opt.proj_dim),
+                nn.BatchNorm1d(opt.num_slots),
+                nn.ReLU(),
+                nn.Linear(opt.proj_dim, opt.proj_dim)
+            )
+        else:
+            assert opt.hid_dim == opt.proj_dim, "Identity projection requires hidden dimension size = projection dimention size"
+            self.projector = nn.Identity()
 
 
     def forward(self, x, vis_step):
         """
         Calculate projected slot-feature variance and covariance over all the slots for a single batch at once
-        TODO write alternative versions of covariance + batching described in proposal
+        TODO write alternative versions of batching described in proposal
         """
         # Given matrix of slot representations, return loss
         projection = self.projector(x)
         # `projection` has shape: [batch_size, num_slots, proj_dim].
 
-        # Collect all slots over the entire batch
-        proj = projection.reshape((-1,) + projection.shape[2:])
-        # `proj` has shape: [batch_size*num_slots, proj_dim].
-        
-        # Our "batch size" here is: (batch size) x (# slots)
-        proj_batch_sz = x.shape[0]
+        if self.cov_over_slots:
+            # Calculate covariance over slots loss for each image separately, then take average. Same for std loss.
+            # Take mean over feature dimension for each slot of each batch (separately)
+            proj = projection
+            proj_mean = torch.mean(proj, dim=2, keepdim=True)
+            proj = proj - proj_mean
+            proj_batch_sz = proj.shape[2]
+            # `proj_mean` has shape: [batch_size, num_slots, 1]
+            # `proj` has shape: [batch_size, num_slots, proj_dim]
 
-        # Zero-center each projection dimension (subtract per-dimension mean)
-        # Should not affect the variance/covariance calculations below, but may be important for numerical stability?
-        proj_mean = torch.mean(proj, dim=0)
-        proj = proj - proj_mean
-        # `proj_mean` has shape: [proj_dim].
-        # `proj` has shape: [batch_size*num_slots, proj_dim].
+            # Einstein summation performs per-image matrix multiplication without need for transpose or iteration
+            cov = torch.einsum('lij, lkj -> lik', proj, proj) / (proj_batch_sz - 1)
+            # `cov_out` has shape: [batch_size, num_slots, num_slots]
+            
+            # Set all diagonal elements (in each element of the batch) to zero --> equivalent to operating only on off diagonal elements
+            cov_calc = cov
+            torch.diagonal(cov_calc, 0, dim1=1, dim2=2).zero_()             # isolate off-diag cov. matrix elements for each image
+            cov_calc = torch.flatten(cov_calc, start_dim=1, end_dim=2)      # flatten all off-diag elements for each image into a vector
+            cov_calc = cov_calc.pow_(2).sum(dim=1).div(self.cov_div)        # apply covariance loss calc. to each image separately
+            cov_loss = torch.mean(cov_calc)                                 # average covariance losses over all images in batch
+            # `cov_calc` has shape: [batch_size]
+            
+            # Compare to unoptimized baseline
+            # cov_loss_test = sum([self._off_diagonal(cov[idx]).pow_(2).sum().div(self.cov_div) for idx in range(cov.shape[0])]) / cov.shape[0]
+            # assert abs(cov_loss_test.item() - cov_loss.item()) < 1e-8
+            
+            std = torch.sqrt(torch.var(proj, dim=2) + self.eps)
+            std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
+            # `std` has shape: [num_slots]
+        else:
+            # Calculate covariance loss over projected slot features
+            # Collect all slots over the entire batch
+            proj = projection.reshape((-1,) + projection.shape[2:])
+            # `proj` has shape: [batch_size*num_slots, proj_dim].
+            
+            # Our "batch size" here is: (batch size) x (num_slots)
+            # NOTE: previously, this was x.shape[0] which is actually equal to batch size
+            # when we expected it to be (batch size) x (num_slots). Luckily, num_slots
+            # has been constant over all runs so we will just need to adjust cov_weight by 
+            # a factor of num_slots to replicate past results for cov over slot features.
+            proj_batch_sz = proj.shape[0]
 
-        # Calculate covariance loss over projected slot features
-        cov = (proj.T @ proj) / (proj_batch_sz - 1)
-        cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.cov_div)
-        # `cov` has shape: [proj_dim, proj_dim].
+            # Zero-center each projection dimension (subtract per-dimension mean)
+            proj_mean = torch.mean(proj, dim=0)
+            proj = proj - proj_mean
+            # `proj_mean` has shape: [proj_dim].
+            # `proj` has shape: [batch_size*num_slots, proj_dim].
 
-        # Calculate variance loss over projected slot features
-        std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
-        std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
-        # `std` has shape: [proj_dim].
+            cov = (proj.T @ proj) / (proj_batch_sz - 1)
+            cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.cov_div)
+            # `cov` has shape: [proj_dim, proj_dim].
 
-        out = {"std_loss": std_loss, "cov_loss": cov_loss, 
-               'proj_mean': torch.mean(proj_mean).item(), 'proj_batch_sz': proj_batch_sz}
+            # Calculate variance loss over projected slot features
+            std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
+            std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
+            # `std` has shape: [proj_dim].
+            # cov. over slots shape: [num_slots].
+
+        out = {"std_loss": std_loss, "cov_loss": cov_loss, 'proj_mean': torch.mean(proj_mean).item(),
+               'proj_batch_sz': proj_batch_sz}
 
         if self.vis:
             out['cov_mx'] = cov.detach().cpu()
