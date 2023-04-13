@@ -71,10 +71,10 @@ def generate_coco_embeddings(args):
 if __name__ == '__main__':
     # Generate embeddings for COCO 2017 dataset from frozen ViT encoder for later use
     parser = argparse.ArgumentParser()
-    parser.add_argument('--output_dir', default='./tmp/model10.ckpt', type=str, help='where to save embeddings' )
+    parser.add_argument('--output_dir', default='./data/coco_embeddings', type=str, help='where to save embeddings' )
     parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--num_workers', default=4, type=int, help='number of workers for loading data')
-    parser.add_argument('--dataset_path', default="./data/CLEVR_v1.0/images", type=str, help='path to COCO dataset')
+    parser.add_argument('--dataset_path', default="./data/coco", type=str, help='path to COCO dataset')
     parser.add_argument('--split', default='train', type=str)
 
     generate_coco_embeddings(parser.parse_args())

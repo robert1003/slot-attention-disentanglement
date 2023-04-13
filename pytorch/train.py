@@ -31,8 +31,6 @@ def main(opt):
         resolution = (224, 224)
         train_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, split='train', resolution=resolution)
     elif opt.dataset == "clevr":
-        train_set = CLEVR(path=opt.dataset_path, split="train")
-    elif opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train",
                 rescale=opt.dataset_rescale)
         mdsprites = False
@@ -53,10 +51,7 @@ def main(opt):
         model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss, mdsprites=mdsprites).to(device)
     elif opt.dinosaur:
         # Hidden dimension must be dimension of ViT encoding for each token
-        hid_dim = 768
-        model = DINOSAURProjection(resolution, opt.num_slots, opt.num_iterations, hid_dim, 
-                                        opt.proj_dim, std_target=opt.std_target, vis=opt.vis_freq > 0, 
-                                        cov_div_square=opt.cov_div_sq).to(device)
+        model = DINOSAURProjection(resolution, opt, vis=opt.vis_freq > 0).to(device)
     else:
         model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0, mdsprites=mdsprites).to(device)
 
@@ -82,7 +77,7 @@ def main(opt):
         total_loss = ckpt['total_loss']
         wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt, id=ckpt['wandb_run_id'], resume="must")
     else:
-        wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
+        wandb.init(project="slot_attn", config=opt) #(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
         i = 0
         total_loss = 0
 

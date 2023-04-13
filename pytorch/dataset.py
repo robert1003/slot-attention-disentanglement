@@ -246,7 +246,7 @@ class COCO2017Embeddings(COCO2017):
         self.embed_path = embed_path
 
     def __getitem__(self, index):
-        # TODO: convert target into per-pixel labels, and then resize target as well for evaluation
+        # TODO(as): convert target into per-pixel labels, and then resize target as well for evaluation
         id = self.ids[index]
         image, _ = self._load_image(id)
         #target = self._load_target(id)

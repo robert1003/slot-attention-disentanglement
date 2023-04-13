@@ -218,8 +218,6 @@ class SlotAttentionAutoEncoder(nn.Module):
             eps = 1e-8, 
             hidden_dim = 128)
         
-        self.width_init = self.height_init = 8
-
     def forward(self, image):
         # `image` has shape: [batch_size, num_channels, width, height].
 
@@ -239,7 +237,6 @@ class SlotAttentionAutoEncoder(nn.Module):
         slots_rep = self.slot_attention(x)
         # `slots_rep` has shape: [batch_size, num_slots, slot_size].
         
-        # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
         x = self.decoder_cnn(slots_rep)
         # `x` has shape: [batch_size*num_slots, width, height, num_channels+1].
 
@@ -440,12 +437,17 @@ class DINOSAURProjection(SlotAttentionProjection):
     TODO: uses linear positional encodings rather than learned? (pg. 33)
     TODO: Claims to use 128x128 reconstruction objective, but does not match the 224x224 image size input to the ViT. 
     TODO: may be the case that we need to use a stronger decoder, but this a design decision we can test
+    TODO: decide on decoder to use --> probably stronger CLEVR one, but what dimension should we spatially broadcast to?
     """
-    def __init__(self, resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis=False, cov_div_square=False):
-        super().__init__(resolution, num_slots, num_iterations, hid_dim, proj_dim, std_target, vis, cov_div_square)
+
+    def __init__(self, resolution, opt, vis):
+        assert opt.hid_dim == 768, "DINOSAURProjection requires hidden dimension of 768"
+        super().__init__(resolution, opt, vis, mdsprites=False)
 
         # TODO: this reconstructs (224, 224) but we can see if default (128, 128) gives better results
         self.width_init = self.height_init = 16
+
+        # TODO: use stronger CLEVR decoder for now, may have to write custom decoder for COCO later (note: this decoder upscales)
         self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
 
     def forward(self, embed, image, vis_step):
