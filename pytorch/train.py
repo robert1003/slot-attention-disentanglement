@@ -123,7 +123,7 @@ def main(opt):
 
                 # Basic visualization of distribution of slot initializations in Slot Attn. module
                 vis_dict['slot_sample_mean'] = torch.mean(model.slot_attention.slots_mu).item()
-                vis_dict['slot_sample_std'] = torch.mean(model.slot_attention.slots_sigma).item()
+                vis_dict['slot_sample_std'] = torch.mean(model.slot_attention.slots_log_sigma).item()
 
                 # Visualize the mean of the per-dimension means of slot projections 
                 # (mean of per-slot means for covariance over slots setting)
