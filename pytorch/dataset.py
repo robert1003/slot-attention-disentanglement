@@ -224,9 +224,11 @@ class COCO2017(VisionDataset):
     def __getitem__(self, index):
         id = self.ids[index]
         image, name = self._load_image(id)
-
+        target = self._load_target(id)
         image = self.img_transform(image)
-        sample = {'image': image, 'src' : name}
+
+        # Target is a flag for whether this example contains a valid mask
+        sample = {'image': image, 'src' : name, 'target': len([ann for ann in target if ann['iscrowd'] == 0]) > 0}
         return sample
 
     def _load_image(self, id):
@@ -247,7 +249,9 @@ class COCO2017Embeddings(COCO2017):
     def __init__(self, data_path='./data/coco', embed_path='./data/coco/embedding', split='val', resolution=(224, 224)):
         super().__init__(data_path, split, resolution)
         self.embed_path = embed_path
+        self.ids = [int(i.split('.')[0]) for i in os.listdir(self.embed_path) if '.npy' in i]
         self.mask_transform = transforms.Resize(size=resolution)
+        self.max_obj_per_image = 90     # max number of labeled objects in any test/validation image
 
     def __getitem__(self, index):
         id = self.ids[index]
@@ -266,7 +270,15 @@ class COCO2017Embeddings(COCO2017):
         masks = torch.where(mask_sum > 1, 0, masks)
         # plt.imshow( mask_sum )
         # plt.imshow( torch.sum(masks, dim=0) )
-        
+
+        # Pad out masks to max number of objects 
+        mask_shape = masks.shape
+        num_pad = self.max_obj_per_image - mask_shape[0]
+        assert num_pad >= 0, f"Found more object labels than max_obj_per_image: {mask_shape[0]}"
+        if num_pad > 0:
+            padding = torch.zeros((num_pad, mask_shape[1], mask_shape[2]))
+            masks = torch.concat((masks, padding))
+
         masks_out = torch.permute(torch.flatten(masks, start_dim=1, end_dim=2), (1, 0))
 
         sample = {'image': image, 'embedding': embed, 'mask' : masks_out}

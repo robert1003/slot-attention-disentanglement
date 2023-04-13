@@ -223,16 +223,16 @@ class SlotAttentionAutoEncoder(nn.Module):
 
         # Convolutional encoder with position embedding.
         x = self.encoder_cnn(image)  # CNN Backbone.
-        #x = nn.LayerNorm(x.shape[1:]).to(device)(x)
+
+        return self._forward_post_backbone(x, image)
+
+    def _forward_post_backbone(self, x, image):
         x = self.encoder_layer_norm(x)
         x = self.fc1(x)
         x = F.relu(x)
         x = self.fc2(x)  # Feedforward network on set.
         # `x` has shape: [batch_size, width*height, input_size].
 
-        return self._forward_post_backbone(x, image)
-
-    def _forward_post_backbone(self, x, image):
         # Slot Attention module.
         slots_rep = self.slot_attention(x)
         # `slots_rep` has shape: [batch_size, num_slots, slot_size].
@@ -420,7 +420,7 @@ class DINOSAURProjection(SlotAttentionProjection):
     """
     Modified Slot Attention architecture used for the frozen-ViT DINOSAUR experiment. 
     DINOSAUR: https://openreview.net/pdf?id=b9tUk-f_aG
-    Experiment is generally outlined at the beginning of Section 4.3 and is used to motivate the paper's use
+    Experiment is generally outlined at the beginning of Section 4.3 (pg8) and is used to motivate the paper's use
     of a feature reconstruction objective, rather than the image reconstruction objective used by Slot Attention.
     Further details and parameters for the experiment are outlined in Appendices E.1 and E.2 (pg. 31 and 33).
 
@@ -430,28 +430,73 @@ class DINOSAURProjection(SlotAttentionProjection):
     which only runs the part of the SlotAttentionAutoEncoder.forward method that comes after the CNN encoder 
     (specifically the Slot Attention module and the spatial broadcast decoder).
 
-    TODO: some slightly contradictory training config from different parts of the paper
-        Experiment settings (pg 31): LR 4e-4, 
-        Experiment settings (pg33): 0.0002 peak LR, slot dimension 256, MLP hidden dim. 512, 250k steps, batch size 64, 
-                2500 LR warmup steps, cosine annealing, 1.0 gradient clipping, random horizontal flip training augmentation
-    TODO: uses linear positional encodings rather than learned? (pg. 33)
-    TODO: Claims to use 128x128 reconstruction objective, but does not match the 224x224 image size input to the ViT. 
-    TODO: may be the case that we need to use a stronger decoder, but this a design decision we can test
-    TODO: decide on decoder to use --> probably stronger CLEVR one, but what dimension should we spatially broadcast to?
+    Note on experiment design: the DINOSAUR paper lists different hyperarameters for Slot Attention experiments
+    on pg31 (+Table 18) and pg33 (Table 19). Given that experiment design on pg31 explicitly mentions the experiment we
+    are running here, we will use the setup mentioned there. Other design seems to be related to other ablations run 
+    using Slot Attention (number of slots, etc.).
+
+    Experiment settings (pg31):
+        - LR 4e-4
+        - 7 slots
+        - image reconstruction at 128x128 resolution --> NOTE: we use 224x224 instead since this is the size the of ViT input
+        - spatial broadcast decoder 
+        - rest is same as main experiments (Table 18, pg32)
+            - 500k steps
+            - batch size 64
+            - 10k warmup steps
+            - 100k exponential decay half-life
+            - gradient norm clipping at 1.0 (TODO only difference from current set up)
+            - 3 slot attention iterations
+            - slot dimension of 256
+            - MLP hidden dimension of 1024 (4 * slot dimension)
+            
+            Data augmentation: (NOTE: we do not implement these to avoid needing the frozen ViT at train time)
+            - Center crop
+            - random horizontal flip
+
+    python3 train.py --dinosaur --model_dir ./checkpoint/coco --batch_size 64 --num_slots 7 --hid_dim 256 --grad-clip 1 
+        --dataset_path ./data/coco --embed_path ./data/coco/embedding
+    
+    
+    TODO: may be the case that we need to use a stronger decoder (Transformer vs. MLP decoder from paper?)
+    TODO: uses CLEVR spatial broadcast decoder by default (experiment with correct size to spatially broadcast to? maybe take mdsprites broadcast approach?)
     """
 
     def __init__(self, resolution, opt, vis):
-        assert opt.hid_dim == 768, "DINOSAURProjection requires hidden dimension of 768"
         super().__init__(resolution, opt, vis, mdsprites=False)
+        
+        # ViT-B/16 encoder outputs tokens of dimensionality 768
+        vit_dim = 768
 
-        # TODO: this reconstructs (224, 224) but we can see if default (128, 128) gives better results
+        # No encoder used, embeddings pre-generated
+        self.encoder_cnn = None
+
+        # Run additional layer norm + linear layer after the ViT and before Slot Attention module
+        # This allows normal fc1 and fc2 to keep original architecture
+        self.encoder_ln0 = nn.LayerNorm(vit_dim, elementwise_affine=True, eps=0.001)
+        self.fc0 = nn.Linear(vit_dim, opt.hid_dim)
+
+        self.slot_attention = SlotAttention(
+            num_slots=self.num_slots,
+            dim=opt.hid_dim,
+            iters = self.num_iterations,
+            eps = 1e-8, 
+            hidden_dim = 4 * opt.hid_dim)
+        
+
+        # init dimension of 16 reconstructs 224x224 image, init dimension of 8 reconstructs 128x128 image. Experiment calls for 
+        # 128x128 reconstruction, but ViT input is 224x224 so use this larger dimension
         self.width_init = self.height_init = 16
 
         # TODO: use stronger CLEVR decoder for now, may have to write custom decoder for COCO later (note: this decoder upscales)
         self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
 
     def forward(self, embed, image, vis_step):
-        # TODO: add one hidden layer MLP
+        # Additional MLP to map ViT token dimension to slot dimension
+        # NOTE: this is a deviation from experiment design, but allows us to preserve the slot attention module architecture
+        embed = self.encoder_ln0(embed)
+        embed = self.fc0(embed)
+        embed = torch.nn.functional.relu(embed)
 
         recon_combined, recons, masks, slots = super()._forward_post_backbone(embed, image)
         # `recon_combined` has shape: [batch_size, width, height, num_channels].

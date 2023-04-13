@@ -77,7 +77,7 @@ def main(opt):
         total_loss = ckpt['total_loss']
         wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt, id=ckpt['wandb_run_id'], resume="must")
     else:
-        wandb.init(project="slot_attn", config=opt) #(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
+        wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
         i = 0
         total_loss = 0
 
@@ -154,10 +154,13 @@ def main(opt):
                     recon_combined = (recon_combined + 1.) / 2.
                     recons = (recons + 1.) / 2.
 
+                max_object = 0
+                if opt.dinosaur:
+                    max_object = train_set.max_obj_per_image
                 if not opt.base:
-                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict)
+                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict, max_object)
                 else:
-                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, None)
+                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, None, max_object)
             wandb.log(vis_dict, step=i)
             
             total_loss += loss.item()
@@ -165,6 +168,8 @@ def main(opt):
 
             optimizer.zero_grad()
             loss.backward()
+            if opt.grad_clip >= 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), opt.grad_clip)
             optimizer.step()
 
             if vis_step:
@@ -202,7 +207,7 @@ def main(opt):
 
 
 
-def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict):
+def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict, max_object):
     """Add visualizations to the dictionary to be logged with W&B"""
     image = sample['image']
     if not opt.base:
@@ -260,6 +265,13 @@ def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_
 
     # Visualize ARI performance
     if 'mask' in sample:
+        if opt.dinosaur:
+            # Pad predicted masks to match number of GT masks
+            num_pad = max_object - masks.shape[1]
+            if num_pad > 0:
+                padding = torch.zeros((masks.shape[0], num_pad, masks.shape[2], masks.shape[3], 1))
+                masks = torch.concat((masks, padding), dim=1)
+
         flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
         flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
         vis_dict['ari'] = adjusted_rand_index(sample['mask'].to(device), flattened_masks.to(device)).mean().item()
@@ -300,6 +312,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset-rescale', action='store_true', help='by default image is rescaled from [0,255] to [0,1]. This option enables rescale from [0,255] to [-1,1]. This option the one used in original Slot Attention paper')
     parser.add_argument('--dinosaur', action='store_true', help='run projection head SA on top of frozen ViT embeddings')
     parser.add_argument('--embed_path', default="./data/coco/embedding", type=str, help='path to pre-generated COCO 2017 embeddings')
+    parser.add_argument('--grad-clip', default=-1, type=float, help='Level of grad norm clipping to use. <0 to disable.')
 
     main(parser.parse_args())
 

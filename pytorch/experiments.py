@@ -62,9 +62,11 @@ def generate_coco_embeddings(args):
 
             # Store embeddings for each image to individual files in output directory
             # (Store embeddings separately so they can be matched with targets by filename)
-            for embed, name in zip(out, batch['src']):
-                out_name = os.path.join(args.output_dir, name.split('.')[0] + '.npy')
-                np.save(out_name, embed.cpu().numpy())
+            for embed, name, target in zip(out, batch['src'], batch['target']):
+                if target:
+                    # Only store examples with valid masks
+                    out_name = os.path.join(args.output_dir, name.split('.')[0] + '.npy')
+                    np.save(out_name, embed.cpu().numpy())
                 
 
 
