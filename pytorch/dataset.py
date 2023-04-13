@@ -10,8 +10,6 @@ from torch.utils.data.dataloader import default_collate
 from torchvision.datasets import VisionDataset
 
 
-import matplotlib.pyplot as plt
-
 class PARTNET(Dataset):
     def __init__(self, split='train'):
         super(PARTNET, self).__init__()
