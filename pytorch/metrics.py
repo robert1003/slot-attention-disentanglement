@@ -52,12 +52,13 @@ def adjusted_rand_index(true_mask, pred_mask):
     max_rindex = (aindex + bindex) / 2
     ari = (rindex - expected_rindex) / (max_rindex - expected_rindex)
 
-    if max_rindex - expected_rindex == 0:
+    if (max_rindex - expected_rindex == 0).any().item():
         # Rather than return NaN ARI, return 0. Temporary fix for ARI issues
         # Occurs occassionally when there is only one object in an image. Seems like
         # this might be related to the comment below
-        assert rindex == expected_rindex
-        return torch.zeros_like(ari)
+        # assert rindex == expected_rindex
+        return torch.where(max_rindex - expected_rindex == 0, torch.ones_like(ari), ari)
+    
 
     # The case where n_true_groups == n_pred_groups == 1 needs to be
     # special-cased (to return 1) as the above formula gives a divide-by-zero.
