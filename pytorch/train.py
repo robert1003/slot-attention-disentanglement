@@ -37,8 +37,10 @@ def main(opt):
         resolution = (64, 64)
         mdsprites = True
     else:
-        train_set = MultiDSprites(path=opt.dataset_path, split='train', num_slots=opt.num_slots,
+        assert opt.num_slots == 5, "Invalid number of slots for MultiDSpritesColorBackground"
+        train_set = MultiDSpritesColorBackground(path=opt.dataset_path,
                 rescale=opt.dataset_rescale)
+        resolution = (64, 64)
         mdsprites = True
 
     if opt.base:
@@ -121,7 +123,7 @@ def main(opt):
 
                 # Basic visualization of distribution of slot initializations in Slot Attn. module
                 vis_dict['slot_sample_mean'] = torch.mean(model.slot_attention.slots_mu).item()
-                vis_dict['slot_sample_std'] = torch.mean(model.slot_attention.slots_sigma).item()
+                vis_dict['slot_sample_std'] = torch.mean(model.slot_attention.slots_log_sigma).item()
 
                 # Visualize the mean of the per-dimension means of slot projections 
                 # (mean of per-slot means for covariance over slots setting)
