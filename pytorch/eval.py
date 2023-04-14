@@ -40,12 +40,12 @@ def main(opt):
     model.eval()
 
     ari = []
-    for sample  in test_dataloader:
+    for sample in test_dataloader:
         image = sample['image'].to(device)
         if opt.base:
             recon_combined, recons, masks, slots = model(image)
         else: 
-            recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
+            recon_combined, recons, masks, slots, proj_loss_dict = model(image, False)
 
         if opt.dataset_rescale:
             recon_combined = (recon_combined + 1.) / 2.
