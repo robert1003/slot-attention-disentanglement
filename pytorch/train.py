@@ -313,6 +313,7 @@ if __name__ == "__main__":
     parser.add_argument('--dinosaur', action='store_true', help='run projection head SA on top of frozen ViT embeddings')
     parser.add_argument('--embed_path', default="./data/coco/embedding", type=str, help='path to pre-generated COCO 2017 embeddings')
     parser.add_argument('--grad-clip', default=-1, type=float, help='Level of grad norm clipping to use. <0 to disable.')
+    parser.add_argument('--proj-layernorm', action='store_true', help='use layernorm in projection layer (default is batchnorm)')
 
     main(parser.parse_args())
 
