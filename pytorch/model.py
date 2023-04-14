@@ -297,7 +297,7 @@ class ProjectionHead(nn.Module):
             self.cov_div = self.proj_dim
 
         # VICReg paper, Section 4.2. Two FC layers with non-linearities and a final linear layer
-        norm_layer = nn.LayerNorm if opt.layernorm else nn.BatchNorm1d
+        norm_layer = nn.LayerNorm if opt.proj_layernorm else nn.BatchNorm1d
 
         if not opt.identity_proj:
             self.projector = nn.Sequential(
