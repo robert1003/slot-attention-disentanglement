@@ -29,7 +29,8 @@ def main(opt):
     if opt.dinosaur:
         # Resolution is hard-coded by the frozen ViT input dimensions
         resolution = (224, 224)
-        train_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, split='train', resolution=resolution)
+        train_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, 
+                                       split='train', resolution=resolution, dynamic_load=opt.coco_mask_dynamic)
     elif opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train",
                 rescale=opt.dataset_rescale)
@@ -158,9 +159,9 @@ def main(opt):
                 if opt.dinosaur:
                     max_object = train_set.max_obj_per_image
                 if not opt.base:
-                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict, max_object)
+                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict, train_set)
                 else:
-                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, None, max_object)
+                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, None, train_set)
             wandb.log(vis_dict, step=i)
             
             total_loss += loss.item()
@@ -207,7 +208,7 @@ def main(opt):
 
 
 
-def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict, max_object):
+def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict, train_set):
     """Add visualizations to the dictionary to be logged with W&B"""
     image = sample['image']
     if not opt.base:
@@ -264,17 +265,35 @@ def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_
         vis_dict['proj_input_norm'] = proj_loss_dict['proj_input_norm']
 
     # Visualize ARI performance
-    if 'mask' in sample:
-        if opt.dinosaur:
-            # Pad predicted masks to match number of GT masks
-            num_pad = max_object - masks.shape[1]
-            if num_pad > 0:
-                padding = torch.zeros((masks.shape[0], num_pad, masks.shape[2], masks.shape[3], 1))
-                masks = torch.concat((masks, padding), dim=1)
+    if 'mask' in sample or opt.coco_mask_dynamic:
+        if 'mask' in sample:
+            if opt.dinosaur:
+                # Pad predicted masks to match number of GT masks
+                num_pad = train_set.max_obj_per_image - masks.shape[1]
+                if num_pad > 0:
+                    padding = torch.zeros((masks.shape[0], num_pad, masks.shape[2], masks.shape[3], 1))
+                    masks = torch.concat((masks, padding), dim=1)
 
-        flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
-        flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
-        vis_dict['ari'] = adjusted_rand_index(sample['mask'].to(device), flattened_masks.to(device)).mean().item()
+            flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
+            flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
+            vis_dict['ari'] = adjusted_rand_index(sample['mask'].to(device), flattened_masks.to(device)).mean().item()
+        else:
+            ari_sum = 0
+            for idx in range(sample['id'].shape[0]):
+                # Load ground truth mask for a single sample
+                gt_mask = train_set.load_mask(sample['id'][idx].item())
+                pred_mask = masks[idx]
+
+                # Pad predicted masks to match number of GT masks
+                num_pad = gt_mask.shape[1] - pred_mask.shape[0]
+                if num_pad > 0:
+                    padding = torch.zeros((num_pad, pred_mask.shape[1], pred_mask.shape[2], 1))
+                    pred_mask = torch.concat((pred_mask, padding), dim=0)
+                
+                flattened_masks = torch.flatten(pred_mask, start_dim=1, end_dim=3)
+                flattened_masks = torch.permute(flattened_masks, (1, 0))
+                ari_sum += adjusted_rand_index(gt_mask.to(device).unsqueeze(0), flattened_masks.to(device).unsqueeze(0)).item()
+            vis_dict['ari'] = ari_sum / sample['id'].shape[0]
 
     return vis_dict
 
@@ -312,6 +331,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset-rescale', action='store_true', help='by default image is rescaled from [0,255] to [0,1]. This option enables rescale from [0,255] to [-1,1]. This option the one used in original Slot Attention paper')
     parser.add_argument('--dinosaur', action='store_true', help='run projection head SA on top of frozen ViT embeddings')
     parser.add_argument('--embed_path', default="./data/coco/embedding", type=str, help='path to pre-generated COCO 2017 embeddings')
+    parser.add_argument('--coco-mask-dynamic', action='store_true', help='load COCO masks only when they are needed for ARI calculation')
     parser.add_argument('--grad-clip', default=-1, type=float, help='Level of grad norm clipping to use. <0 to disable.')
     parser.add_argument('--proj-layernorm', action='store_true', help='use layernorm in projection layer (default is batchnorm)')
 

@@ -244,21 +244,36 @@ class COCO2017Embeddings(COCO2017):
     """
     A dataset for handling pre-generated ViT embeddings of the COCO 2017 dataset.
     """
-    def __init__(self, data_path='./data/coco', embed_path='./data/coco/embedding', split='val', resolution=(224, 224)):
+    def __init__(self, data_path='./data/coco', embed_path='./data/coco/embedding', split='val', resolution=(224, 224), dynamic_load=True):
         super().__init__(data_path, split, resolution)
         self.embed_path = embed_path
         self.ids = [int(i.split('.')[0]) for i in os.listdir(self.embed_path) if '.npy' in i]
         self.mask_transform = transforms.Resize(size=resolution)
         self.max_obj_per_image = 90     # max number of labeled objects in any test/validation image
+        self.dynamic_load = dynamic_load
 
     def __getitem__(self, index):
         id = self.ids[index]
         image, _ = self._load_image(id)
-        target = self._load_target(id)
         embed = self._load_embedding(id)
         image = self.img_transform(image)
+        sample = {'image': image, 'embedding': embed}
 
+        if self.dynamic_load:
+            sample['id'] = id
+        else:
+            sample['mask'] = self.load_mask(id)
+
+        return sample
+
+    def _load_embedding(self, id):
+        path = self.coco.loadImgs(id)[0]["file_name"].split('.')[0] + '.npy'
+        return torch.tensor(np.load(os.path.join(self.embed_path, path)))
+    
+
+    def load_mask(self, id):
         # Convert annotations to masks and filter out crowd instance annotations (DINOSAUR pg36) 
+        target = self._load_target(id)
         mask_list = [torch.from_numpy(self.coco.annToMask(ann)).unsqueeze(0) for ann in target if ann['iscrowd'] == 0]
         mask_list = [self.mask_transform(msk) for msk in mask_list]
         masks = torch.concat(mask_list, dim=0)
@@ -277,13 +292,7 @@ class COCO2017Embeddings(COCO2017):
             padding = torch.zeros((num_pad, mask_shape[1], mask_shape[2]))
             masks = torch.concat((masks, padding))
 
-        masks_out = torch.permute(torch.flatten(masks, start_dim=1, end_dim=2), (1, 0))
+        return torch.permute(torch.flatten(masks, start_dim=1, end_dim=2), (1, 0))
 
-        sample = {'image': image, 'embedding': embed, 'mask' : masks_out}
-        return sample
-
-    def _load_embedding(self, id):
-        path = self.coco.loadImgs(id)[0]["file_name"].split('.')[0] + '.npy'
-        return torch.tensor(np.load(os.path.join(self.embed_path, path)))
     
 
