@@ -11,6 +11,7 @@ Example usage:
 import argparse
 import numpy as np
 import os
+import pickle
 
 import functools
 import tensorflow.compat.v1 as tf
@@ -123,6 +124,12 @@ if __name__ == "__main__":
 
         np.save(os.path.join(args.outdir, str(idx) + "_image.npy"), raw_record['image'].numpy())
         np.save(os.path.join(args.outdir, str(idx) + "_mask.npy"), raw_record['mask'].numpy())
+
+        # Store object features needed for feature prediction task (https://arxiv.org/pdf/2107.00637.pdf Appendix B.2)
+        object_features = {i : raw_record[i].numpy() for i in ['color', 'scale', 'shape', 'x', 'y', 'visibility']}
+        with open(os.path.join(args.outdir, str(idx) + "_feature.pkl"), "wb") as fd:
+            pickle.dump(object_features, fd, protocol=pickle.HIGHEST_PROTOCOL)
+
         cnt += 1
 
         if cnt % 10000 == 0:

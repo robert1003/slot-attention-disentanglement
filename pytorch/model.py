@@ -418,4 +418,36 @@ class ProjectionHead(nn.Module):
 
 
 
+class MDSpritesFeaturePrediction(nn.Module):
+    def __init__(self, opt, resolution):
+        super().__init__()
+
+        # Load and freeze pretrained model
+        if opt.base:
+            self.frozen = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=False, mdsprites=True).to(device)
+        else:
+            self.frozen = SlotAttentionProjection(resolution, opt, vis=False, mdsprites=True).to(device)
+        ckpt = torch.load(opt.model_ckpt, map_location=device)
+        self.frozen.load_state_dict(ckpt['model_state_dict'])
+
+        # Freeze pretrained model
+        for param in self.frozen.parameters():
+            param.requires_grad = False
+
+        # One hidden dimension MLP (performs just as well as MLP with more layers, https://arxiv.org/pdf/2107.00637.pdf Figure 14)
+        self.prediction_head = nn.Sequential(
+            nn.Linear(opt.hid_dim, 256),
+            nn.LeakyReLU(),
+            nn.Linear(256, 11),       # 3xcolor, scale, one-hot encoded shape (MISC?, ellipse, heart, square), x, y
+        )
+        self.base = opt.base
+
+
+    def forward(self, x):
+        if self.base:
+            _, _, _, x, _ = self.frozen(x)
+        else:
+            _, _, _, x, _ = self.frozen(x, False)
+        return self.prediction_head(x)
+
 

@@ -3,6 +3,7 @@ import random
 import json
 import numpy as np
 from PIL import Image
+import pickle
 import torch
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
@@ -184,3 +185,60 @@ class MultiDSpritesColorBackground(Dataset):
 
     def __len__(self):
         return len(self.files)
+
+
+
+
+
+class MultiDSpritesColorFeatures(Dataset):
+    """Dataset for Multi-dSprites (colored on colored) feature prediction task."""
+    def __init__(self, path='./data/multi_dsprites/processed'):
+        super(MultiDSpritesColorFeatures, self).__init__()
+        self.root_dir = path
+        self.files = [i for i in os.listdir(self.root_dir) if 'image' in i]
+        self.img_transform = transforms.Compose([
+                transforms.ToTensor()])
+
+
+    def __getitem__(self, index):
+        image_path = self.files[index]
+        image = Image.fromarray(np.load(os.path.join(self.root_dir, image_path)))
+        image = self.img_transform(image)
+        numerical, categorical = self._get_feature_vectors(image_path.split('/')[-1].split('_')[0])
+        sample = {'image': image, 'numerical': numerical, 'categorical': categorical}
+        return sample
+
+    def __len__(self):
+        return len(self.files)
+    
+
+    def _get_feature_vectors(self, index):
+        feature_path = os.path.join(self.root_dir, index + "_feature.pkl")
+        with open(feature_path, "rb") as fd:
+            feature_dict = pickle.load(fd)
+                
+        # Numerical: # objects x (3 x color, 1 x scale, 1 x 'x', 1 x 'y')
+        numerical = torch.from_numpy(np.concatenate((feature_dict['color'], 
+                                                     np.expand_dims(feature_dict['scale'], 1),
+                                                     np.expand_dims(feature_dict['x'], 1),
+                                                     np.expand_dims(feature_dict['y'], 1)), axis=1))
+
+        # Categorical: # objects x (one-hot shape (3 dims.)) --> TODO(as) this should only be 3 but there are 4 classes?
+        tens = torch.from_numpy(feature_dict['shape']).long()
+        categorical = torch.nn.functional.one_hot(tens, num_classes=4)
+
+
+        return numerical, categorical
+
+
+
+
+
+
+
+
+
+
+
+
+
