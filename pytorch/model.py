@@ -461,7 +461,7 @@ class DINOSAURProjection(SlotAttentionProjection):
             - random horizontal flip
 
     python3 train.py --dinosaur --model_dir ./checkpoint/coco --batch_size 64 --num_slots 7 --hid_dim 256 --grad-clip 1 
-        --dataset_path ./data/coco --embed_path ./data/coco/embedding
+        --dataset_path ./data/coco --embed_path ./data/coco/embedding --coco-mask-dynamic
     
     
     TODO: may be the case that we need to use a stronger decoder (Transformer vs. MLP decoder from paper?)
