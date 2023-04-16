@@ -30,7 +30,8 @@ def main(opt):
         # Resolution is hard-coded by the frozen ViT input dimensions
         resolution = (224, 224)
         train_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, 
-                                       split='train', resolution=resolution, dynamic_load=opt.coco_mask_dynamic)
+                                       split='train', resolution=resolution, dynamic_load=opt.coco_mask_dynamic,
+                                       downsample_mask=opt.dinosaur_downsample)
     elif opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train",
                 rescale=opt.dataset_rescale)
@@ -106,6 +107,8 @@ def main(opt):
             learning_rate = learning_rate * (opt.decay_rate ** (i / opt.decay_steps))
             optimizer.param_groups[0]['lr'] = learning_rate
             image = sample['image'].to(device)
+            if opt.dinosaur_downsample:
+                image = torch.nn.functional.interpolate(image, size=(128, 128))
             vis_dict['learning_rate'] = learning_rate
 
             if i < opt.cov_warmup:
@@ -155,13 +158,10 @@ def main(opt):
                     recon_combined = (recon_combined + 1.) / 2.
                     recons = (recons + 1.) / 2.
 
-                max_object = 0
-                if opt.dinosaur:
-                    max_object = train_set.max_obj_per_image
                 if not opt.base:
-                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict, train_set)
+                    vis_dict = visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots, proj_loss_dict, train_set)
                 else:
-                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, None, train_set)
+                    vis_dict = visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots, None, train_set)
             wandb.log(vis_dict, step=i)
             
             total_loss += loss.item()
@@ -208,9 +208,8 @@ def main(opt):
 
 
 
-def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict, train_set):
+def visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots, proj_loss_dict, train_set):
     """Add visualizations to the dictionary to be logged with W&B"""
-    image = sample['image']
     if not opt.base:
         # Visualize projection space covariance matrix and feature std. dev. as heat maps
         # Resues proj_loss_dict from last step since model does not use projection head in eval
@@ -334,6 +333,7 @@ if __name__ == "__main__":
     parser.add_argument('--coco-mask-dynamic', action='store_true', help='load COCO masks only when they are needed for ARI calculation')
     parser.add_argument('--grad-clip', default=-1, type=float, help='Level of grad norm clipping to use. <0 to disable.')
     parser.add_argument('--proj-layernorm', action='store_true', help='use layernorm in projection layer (default is batchnorm)')
+    parser.add_argument('--dinosaur-downsample', action='store_true', help='run DINOSAUR experiment with (128, 128) resolution rather than (224, 224)')
 
     main(parser.parse_args())
 

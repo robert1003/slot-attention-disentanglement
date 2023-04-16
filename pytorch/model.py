@@ -492,7 +492,11 @@ class DINOSAURProjection(SlotAttentionProjection):
 
         # init dimension of 16 reconstructs 224x224 image, init dimension of 8 reconstructs 128x128 image. Experiment calls for 
         # 128x128 reconstruction, but ViT input is 224x224 so use this larger dimension
-        self.width_init = self.height_init = 16
+        if opt.dinosaur_downsample:
+            # Update: try 128x128 reconstruction to better utilize GPU memory
+            self.width_init = self.height_init = 8
+        else:
+            self.width_init = self.height_init = 16
 
         # TODO: use stronger CLEVR decoder for now, may have to write custom decoder for COCO later (note: this decoder upscales)
         self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
