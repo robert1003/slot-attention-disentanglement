@@ -302,7 +302,7 @@ if __name__ == "__main__":
     parser.add_argument('--info-nce', action='store_true', help='use InfoNCE style loss instead of cov loss')
     parser.add_argument('--temperature', default=0.1, type=float, help='temperature used for info-nce loss')
     parser.add_argument('--info-nce-weight', default=1.0, type=float, help='weight given to the info nce loss')
-    parser.add_argument('--info-nce-warmup', default=1000, type=float, help='number of warup steps for the infonce loss')
+    parser.add_argument('--info-nce-warmup', default=5000, type=float, help='number of warup steps for the infonce loss')
     parser.add_argument('--cov-warmup', default=0, type=int, help='number of warmup steps for the covariance loss')
     parser.add_argument('--bce-loss', action='store_true', help='calculate the reconstruction loss using binary cross entropy rather than mean squared error')
     parser.add_argument('--identity-proj', action='store_true', help='set projection to identity function. This option is equivalent to applying var/cov regularization on slot vectors directly')
