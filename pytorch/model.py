@@ -341,25 +341,7 @@ class ProjectionHead(nn.Module):
             mask = torch.eye(num_slots).repeat(batch_size, 1, 1).bool()
             cosine_similarity[mask] = -1e9
             info_nce_loss = torch.logsumexp(cosine_similarity, dim=(1,2)) / (num_slots**2)
-
-            proj = projection
-            proj_batch_sz = proj.shape[0]
-
-            # Zero-center each projection dimension (subtract per-dimension mean)
-            proj_mean = torch.mean(proj, dim=0)
-            proj = proj - proj_mean
-            # `proj_mean` has shape: [proj_dim].
-            # `proj` has shape: [batch_size*num_slots, proj_dim].
-
-            cov = (proj.T @ proj) / (proj_batch_sz - 1)
-            cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.cov_div)
-            # `cov` has shape: [proj_dim, proj_dim].
-
-            # Calculate variance loss over projected slot features
-            std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
-            std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
-            # `std` has shape: [proj_dim].
-            # cov. over slots shape: [num_slots].
+            info_nce_loss = torch.mean(info_nce_loss)
         elif self.cov_over_slots:
             # Calculate covariance over slots loss for each image separately, then take average. Same for std loss.
             # Take mean over feature dimension for each slot of each batch (separately)
@@ -419,13 +401,13 @@ class ProjectionHead(nn.Module):
             # cov. over slots shape: [num_slots].
 
         if self.info_nce:
-            out = {"info_nce_loss", info_nce_loss}
+            out = {"info_nce_loss": info_nce_loss}
         else:
             out = {"std_loss": std_loss, "cov_loss": cov_loss, 'proj_mean': torch.mean(proj_mean).item(),
                'proj_batch_sz': proj_batch_sz}
 
-        out['cov_mx'] = cov.detach().cpu()
-        out['std_vec'] = std.detach().cpu()
+            out['cov_mx'] = cov.detach().cpu()
+            out['std_vec'] = std.detach().cpu()
 
         if vis_step:
             # Take vector norm of the representation and projection for each slot in the batch
