@@ -290,6 +290,8 @@ class ProjectionHead(nn.Module):
         self.eps = epsilon      # small constant for numerical stability
         self.vis = vis
         self.cov_over_slots = opt.slot_cov
+        self.info_nce = opt.info_nce
+        self.temperature = opt.temperature
 
         if opt.cov_div_sq:
             self.cov_div = self.proj_dim**2
@@ -327,7 +329,38 @@ class ProjectionHead(nn.Module):
         projection = self.projector(x)
         # `projection` has shape: [batch_size, num_slots, proj_dim].
 
-        if self.cov_over_slots:
+        
+        if self.info_nce:
+            # formula: log (\sum_k, k != i exp(<z_i, z_k> / temperature))
+            cosine_similarity = torch.matmul(projection, projection.permute(0, 2, 1)) / self.temperature
+            # `cosine_similarity` has shape: [batch_size, num_slots, num_slots]
+
+            # set diagonal to -inf since we need to exclude self similarity calculation
+            batch_size = cosine_similarity.shape[0]
+            num_slots = cosine_similarity.shape[1]
+            mask = torch.eye(num_slots).repeat(batch_size, 1, 1).bool()
+            cosine_similarity[mask] = -1e9
+            info_nce_loss = torch.logsumexp(cosine_similarity, dim=(1,2)) / (num_slots**2)
+
+            proj = projection
+            proj_batch_sz = proj.shape[0]
+
+            # Zero-center each projection dimension (subtract per-dimension mean)
+            proj_mean = torch.mean(proj, dim=0)
+            proj = proj - proj_mean
+            # `proj_mean` has shape: [proj_dim].
+            # `proj` has shape: [batch_size*num_slots, proj_dim].
+
+            cov = (proj.T @ proj) / (proj_batch_sz - 1)
+            cov_loss = self._off_diagonal(cov).pow_(2).sum().div(self.cov_div)
+            # `cov` has shape: [proj_dim, proj_dim].
+
+            # Calculate variance loss over projected slot features
+            std = torch.sqrt(torch.var(proj, dim=0) + self.eps)
+            std_loss = torch.mean(torch.nn.functional.relu(self.gamma - std))    
+            # `std` has shape: [proj_dim].
+            # cov. over slots shape: [num_slots].
+        elif self.cov_over_slots:
             # Calculate covariance over slots loss for each image separately, then take average. Same for std loss.
             # Take mean over feature dimension for each slot of each batch (separately)
             proj = projection
@@ -385,12 +418,14 @@ class ProjectionHead(nn.Module):
             # `std` has shape: [proj_dim].
             # cov. over slots shape: [num_slots].
 
-        out = {"std_loss": std_loss, "cov_loss": cov_loss, 'proj_mean': torch.mean(proj_mean).item(),
+        if self.info_nce:
+            out = {"info_nce_loss", info_nce_loss}
+        else:
+            out = {"std_loss": std_loss, "cov_loss": cov_loss, 'proj_mean': torch.mean(proj_mean).item(),
                'proj_batch_sz': proj_batch_sz}
 
-        if self.vis:
-            out['cov_mx'] = cov.detach().cpu()
-            out['std_vec'] = std.detach().cpu()
+        out['cov_mx'] = cov.detach().cpu()
+        out['std_vec'] = std.detach().cpu()
 
         if vis_step:
             # Take vector norm of the representation and projection for each slot in the batch

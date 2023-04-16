@@ -108,7 +108,18 @@ def main(opt):
             if opt.base:
                 recon_combined, recons, masks, slots = model(image)
                 loss = criterion(recon_combined, image)
-            else: 
+            elif opt.info_nce:
+                recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
+                info_nce_loss = proj_loss_dict["info_nce_loss"]
+                recon_loss = criterion(recon_combined, image)
+                loss = opt.info_nce_weight * info_nce_loss + recon_loss
+                vis_dict['recon_loss'] = recon_loss.item()
+                vis_dict['info_nce_loss'] = info_nce_loss.item()
+
+                # Visualize projection space batch size (sanity check that this is constant, 
+                # otherwise may result in instabilities)
+                vis_dict['proj_batch_sz'] = proj_loss_dict['proj_batch_sz']
+            else:
                 recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
                 proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + cov_weight * proj_loss_dict["cov_loss"]
                 recon_loss = criterion(recon_combined, image)
@@ -283,6 +294,9 @@ if __name__ == "__main__":
     parser.add_argument('--std_target', default=1.0, type=float, help='target std. deviation for each projection space dimension')
     parser.add_argument('--cov-div-sq', action='store_true', help='divide projection head covariance by the square of the number of projection dimensions')
     parser.add_argument('--slot-cov', action='store_true', help='calculate covariance over slots rather than over projection feature dimension')
+    parser.add_argument('--info-nce', action='store_true', help='use InfoNCE style loss instead of cov loss')
+    parser.add_argument('--temperature', default=0.05, type=float, help='temperature used for info-nce loss')
+    parser.add_argument('--info-nce-weight', default=1.0, type=float, help='weight given to the info nce loss')
     parser.add_argument('--cov-warmup', default=0, type=int, help='number of warmup steps for the covariance loss')
     parser.add_argument('--bce-loss', action='store_true', help='calculate the reconstruction loss using binary cross entropy rather than mean squared error')
     parser.add_argument('--identity-proj', action='store_true', help='set projection to identity function. This option is equivalent to applying var/cov regularization on slot vectors directly')
