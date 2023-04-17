@@ -35,7 +35,7 @@ def main(opt):
         elif opt.dinosaur_heavydownsample:
             downsample_dim = 64
         train_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, 
-                                       split='val', resolution=resolution, dynamic_load=opt.coco_mask_dynamic,
+                                       split='train', resolution=resolution, dynamic_load=opt.coco_mask_dynamic,
                                        downsample_mask=downsample_dim)
     elif opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train",
@@ -277,7 +277,7 @@ def visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots
                 # Pad predicted masks to match number of GT masks
                 num_pad = train_set.max_obj_per_image - masks.shape[1]
                 if num_pad > 0:
-                    padding = torch.zeros((masks.shape[0], num_pad, masks.shape[2], masks.shape[3], 1))
+                    padding = torch.zeros((masks.shape[0], num_pad, masks.shape[2], masks.shape[3], 1)).to(device)
                     masks = torch.concat((masks, padding), dim=1)
 
             flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
