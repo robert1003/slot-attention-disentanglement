@@ -224,9 +224,9 @@ class SlotAttentionAutoEncoder(nn.Module):
         # Convolutional encoder with position embedding.
         x = self.encoder_cnn(image)  # CNN Backbone.
 
-        return self._forward_post_backbone(x, image)
+        return self._forward_post_backbone(x, image.shape[0])
 
-    def _forward_post_backbone(self, x, image):
+    def _forward_post_backbone(self, x, batch_size):
         x = self.encoder_layer_norm(x)
         x = self.fc1(x)
         x = F.relu(x)
@@ -241,7 +241,7 @@ class SlotAttentionAutoEncoder(nn.Module):
         # `x` has shape: [batch_size*num_slots, width, height, num_channels+1].
 
         # Undo combination of slot and batch dimension; split alpha masks.
-        recons, masks = x.reshape(image.shape[0], -1, x.shape[1], x.shape[2], x.shape[3]).split([3,1], dim=-1)
+        recons, masks = x.reshape(batch_size, -1, x.shape[1], x.shape[2], x.shape[3]).split([3,1], dim=-1)
         # `recons` has shape: [batch_size, num_slots, width, height, num_channels].
         # `masks` has shape: [batch_size, num_slots, width, height, 1].
 
@@ -502,14 +502,14 @@ class DINOSAURProjection(SlotAttentionProjection):
             self.width_init = self.height_init = 16
             self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
 
-    def forward(self, embed, image, vis_step):
+    def forward(self, embed, vis_step):
         # Additional MLP to map ViT token dimension to slot dimension
         # NOTE: this is a deviation from experiment design, but allows us to preserve the slot attention module architecture
         embed = self.encoder_ln0(embed)
         embed = self.fc0(embed)
         embed = torch.nn.functional.relu(embed)
 
-        recon_combined, recons, masks, slots = super()._forward_post_backbone(embed, image)
+        recon_combined, recons, masks, slots = super()._forward_post_backbone(embed, embed.shape[0])
         # `recon_combined` has shape: [batch_size, width, height, num_channels].
         # `recons` has shape: [batch_size, num_slots, width, height, num_channels].
         # `masks` has shape: [batch_size, num_slots, width, height, 1].

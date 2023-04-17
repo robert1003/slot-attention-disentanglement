@@ -111,7 +111,9 @@ def main(opt):
 
             learning_rate = learning_rate * (opt.decay_rate ** (i / opt.decay_steps))
             optimizer.param_groups[0]['lr'] = learning_rate
-            image = sample['image'].to(device)
+            image = sample['image']
+            if not opt.dinosaur:
+                image = image.to(device)
             if opt.dinosaur_downsample:
                 image = torch.nn.functional.interpolate(image, size=(128, 128))
             elif opt.dinosaur_heavydownsample:
@@ -129,11 +131,16 @@ def main(opt):
             else: 
                 if opt.dinosaur:
                     embedding = sample['embedding'].to(device)
-                    recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, image, vis_step)
+                    recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, vis_step)
                 else:
                     recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
                 proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + cov_weight * proj_loss_dict["cov_loss"]
-                recon_loss = criterion(recon_combined, image)
+                if opt.dinosaur:
+                    # Move reconstruction onto CPU for loss calculation, then back to GPU for backprop.
+                    # Avoids every putting image on GPU, allowing for larger batch sizes
+                    recon_loss = criterion(recon_combined.cpu(), image).to(device)
+                else:
+                    recon_loss = criterion(recon_combined, image)
                 proj_loss *= opt.proj_weight
                 loss = recon_loss + proj_loss
                 vis_dict['recon_loss'] = recon_loss.item()
