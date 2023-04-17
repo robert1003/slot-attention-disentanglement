@@ -192,20 +192,44 @@ class MultiDSpritesColorBackground(Dataset):
 
 class MultiDSpritesColorFeatures(Dataset):
     """Dataset for Multi-dSprites (colored on colored) feature prediction task."""
-    def __init__(self, path='./data/multi_dsprites/processed'):
+    def __init__(self, path='./data/multi_dsprites/processed', split='train'):
         super(MultiDSpritesColorFeatures, self).__init__()
         self.root_dir = path
         self.files = [i for i in os.listdir(self.root_dir) if 'image' in i]
-        self.img_transform = transforms.Compose([
-                transforms.ToTensor()])
+        
+        # https://arxiv.org/pdf/2107.00637.pdf pg25
+        assert split in ['train', 'val', 'test']
+        if split == 'train':
+            self.files = self.files[:10000]
+            assert len(self.files) == 10000, "Invalid number of train set files."
+        elif split == 'val':
+            self.files = self.files[10000 : 11000]
+            assert len(self.files) == 1000, "Invalid number of validation set files."
+        elif split == 'test':
+            # Assumes dataset path points to the test set. MUST be samples not used to train pretrained model
+            self.files = self.files[:2000]
+            assert len(self.files) == 2000, "Invalid number of test set files."
+        else:
+            assert False, "Invalid split given to MultiDSpritesColorFeatures"
+
+        self.img_transform = transforms.Compose([transforms.ToTensor()])
 
 
     def __getitem__(self, index):
         image_path = self.files[index]
         image = Image.fromarray(np.load(os.path.join(self.root_dir, image_path)))
         image = self.img_transform(image)
-        numerical, categorical = self._get_feature_vectors(image_path.split('/')[-1].split('_')[0])
-        sample = {'image': image, 'numerical': numerical, 'categorical': categorical}
+        numerical, categorical, valid = self._get_feature_vectors(image_path.split('/')[-1].split('_')[0])
+        sample = {'image': image, 'numerical': numerical, 'categorical': categorical, 'valid': valid}
+
+        # mask_path = image_path.replace("image", "mask")
+        # mask = np.load(os.path.join(self.root_dir, mask_path))
+        # mask = ((mask - mask.min()) / (mask.max() - mask.min())).astype(np.uint8)
+        # mask = torch.from_numpy(mask)
+        # import matplotlib.pyplot as plt
+        # for idx in range(mask.shape[0]):
+        #     plt.imshow(mask[idx])
+
         return sample
 
     def __len__(self):
@@ -225,10 +249,15 @@ class MultiDSpritesColorFeatures(Dataset):
 
         # Categorical: # objects x (one-hot shape (3 dims.)) --> TODO(as) this should only be 3 but there are 4 classes?
         tens = torch.from_numpy(feature_dict['shape']).long()
-        categorical = torch.nn.functional.one_hot(tens, num_classes=4)
+        categorical = torch.nn.functional.one_hot(tens, num_classes=4).float()
 
+        # Whether object is visible + features are valid
+        vis = torch.from_numpy(feature_dict['visibility'])
 
-        return numerical, categorical
+        # Remove background (only train/test on foreground objects)
+        vis[0] = 0
+
+        return numerical, categorical, vis
 
 
 

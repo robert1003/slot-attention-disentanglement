@@ -438,16 +438,16 @@ class MDSpritesFeaturePrediction(nn.Module):
         self.prediction_head = nn.Sequential(
             nn.Linear(opt.hid_dim, 256),
             nn.LeakyReLU(),
-            nn.Linear(256, 11),       # 3xcolor, scale, one-hot encoded shape (MISC?, ellipse, heart, square), x, y
+            nn.Linear(256, 10),       # 3xcolor, scale, x, y, one-hot encoded shape (MISC?, ellipse, heart, square)
         )
         self.base = opt.base
 
 
     def forward(self, x):
         if self.base:
-            _, _, _, x, _ = self.frozen(x)
+            recon_combined, recons, masks, x, _ = self.frozen(x)
         else:
-            _, _, _, x, _ = self.frozen(x, False)
-        return self.prediction_head(x)
+            recon_combined, recons, masks, x, _ = self.frozen(x, False)
+        return self.prediction_head(x), recon_combined, recons, masks
 
 
