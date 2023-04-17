@@ -469,7 +469,7 @@ class DINOSAURProjection(SlotAttentionProjection):
     """
 
     def __init__(self, resolution, opt, vis):
-        super().__init__(resolution, opt, vis, mdsprites=False)
+        super().__init__(resolution, opt, vis, mdsprites=True)
         
         # ViT-B/16 encoder outputs tokens of dimensionality 768
         vit_dim = 768
@@ -495,11 +495,12 @@ class DINOSAURProjection(SlotAttentionProjection):
         if opt.dinosaur_downsample:
             # Update: try 128x128 reconstruction to better utilize GPU memory
             self.width_init = self.height_init = 8
+            self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
+        elif opt.dinosaur_heavydownsample:
+            self.decoder_cnn = MDSpritesDecoder(self.hid_dim, (64, 64))
         else:
             self.width_init = self.height_init = 16
-
-        # TODO: use stronger CLEVR decoder for now, may have to write custom decoder for COCO later (note: this decoder upscales)
-        self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
+            self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
 
     def forward(self, embed, image, vis_step):
         # Additional MLP to map ViT token dimension to slot dimension

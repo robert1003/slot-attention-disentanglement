@@ -244,12 +244,12 @@ class COCO2017Embeddings(COCO2017):
     """
     A dataset for handling pre-generated ViT embeddings of the COCO 2017 dataset.
     """
-    def __init__(self, data_path='./data/coco', embed_path='./data/coco/embedding', split='val', resolution=(224, 224), dynamic_load=True, downsample_mask=False):
+    def __init__(self, data_path='./data/coco', embed_path='./data/coco/embedding', split='val', resolution=(224, 224), dynamic_load=True, downsample_mask=0):
         super().__init__(data_path, split, resolution)
         self.embed_path = embed_path
         self.ids = [int(i.split('.')[0]) for i in os.listdir(self.embed_path) if '.npy' in i]
-        if downsample_mask:
-            self.mask_transform = transforms.Resize(size=(128, 128))
+        if downsample_mask > 0:
+            self.mask_transform = transforms.Resize(size=(downsample_mask, downsample_mask))
         else:
             self.mask_transform = transforms.Resize(size=resolution)
         self.max_obj_per_image = 90     # max number of labeled objects in any test/validation image

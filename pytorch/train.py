@@ -29,9 +29,14 @@ def main(opt):
     if opt.dinosaur:
         # Resolution is hard-coded by the frozen ViT input dimensions
         resolution = (224, 224)
+        downsample_dim = 0
+        if opt.dinosaur_downsample:
+            downsample_dim = 128
+        elif opt.dinosaur_heavydownsample:
+            downsample_dim = 64
         train_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, 
-                                       split='train', resolution=resolution, dynamic_load=opt.coco_mask_dynamic,
-                                       downsample_mask=opt.dinosaur_downsample)
+                                       split='val', resolution=resolution, dynamic_load=opt.coco_mask_dynamic,
+                                       downsample_mask=downsample_dim)
     elif opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train",
                 rescale=opt.dataset_rescale)
@@ -109,6 +114,8 @@ def main(opt):
             image = sample['image'].to(device)
             if opt.dinosaur_downsample:
                 image = torch.nn.functional.interpolate(image, size=(128, 128))
+            elif opt.dinosaur_heavydownsample:
+                image = torch.nn.functional.interpolate(image, size=(64, 64))
             vis_dict['learning_rate'] = learning_rate
 
             if i < opt.cov_warmup:
@@ -334,6 +341,8 @@ if __name__ == "__main__":
     parser.add_argument('--grad-clip', default=-1, type=float, help='Level of grad norm clipping to use. <0 to disable.')
     parser.add_argument('--proj-layernorm', action='store_true', help='use layernorm in projection layer (default is batchnorm)')
     parser.add_argument('--dinosaur-downsample', action='store_true', help='run DINOSAUR experiment with (128, 128) resolution rather than (224, 224)')
+    parser.add_argument('--dinosaur-heavydownsample', action='store_true', help='run DINOSAUR experiment with (64, 64) resolution rather than (224, 224)')
+
 
     main(parser.parse_args())
 
