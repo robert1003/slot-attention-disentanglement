@@ -263,9 +263,13 @@ class COCO2017Embeddings(COCO2017):
         sample = {'image': image, 'embedding': embed}
 
         if self.dynamic_load:
-            sample['id'] = id
+            sample['id'] = int(id)
         else:
             sample['mask'] = self.load_mask(id)
+
+        assert isinstance(sample['id'], int)
+        assert isinstance(sample['embedding'], torch.FloatTensor)
+        assert isinstance(sample['image'], torch.FloatTensor)
 
         return sample
 
