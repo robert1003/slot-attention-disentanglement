@@ -31,8 +31,10 @@ def main(opt):
         resolution = (224, 224)
         downsample_dim = 0
         if opt.dinosaur_downsample:
+            resolution = (128, 128)
             downsample_dim = 128
         elif opt.dinosaur_heavydownsample:
+            resolution = (64, 64)
             downsample_dim = 64
         train_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, 
                                        split='train', resolution=resolution, dynamic_load=opt.coco_mask_dynamic,
@@ -72,6 +74,29 @@ def main(opt):
     train_dataloader = torch.utils.data.DataLoader(train_set, batch_size=opt.batch_size,
                             shuffle=True, num_workers=opt.num_workers, pin_memory=True)
     optimizer = optim.Adam(params, lr=opt.learning_rate)
+
+    if opt.print_model:
+        from torchinfo import summary
+        sample = next(iter(train_dataloader))
+        image = sample['image']
+        if not opt.dinosaur:
+            image = image.to(device)
+        if opt.dinosaur_downsample:
+            image = torch.nn.functional.interpolate(image, size=(128, 128))
+        elif opt.dinosaur_heavydownsample:
+            image = torch.nn.functional.interpolate(image, size=(64, 64))
+
+        with torch.no_grad():
+            if opt.base:
+                summary(model, input_data=image)
+            elif opt.info_nce:
+                summary(model, input_data=(image, True))
+            else:
+                if opt.dinosaur:
+                    embedding = sample['embedding'].to(device)
+                    summary(model, input_data=(embedding, True))
+                else:
+                    summary(model, input_data=(image, True))
 
     start = time.time()
 
@@ -327,16 +352,18 @@ def visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots
 
     return vis_dict
 
-
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument('--print_model', action='store_true', help='print model structure')
     parser.add_argument('--model_dir', default='./tmp/model10.ckpt', type=str, help='where to save models' )
     parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--num_slots', default=7, type=int, help='Number of slots in Slot Attention.')
     parser.add_argument('--num_iterations', default=3, type=int, help='Number of attention iterations.')
-    parser.add_argument('--hid_dim', default=64, type=int, help='hidden dimension size')
+    parser.add_argument('--hid_dim', default=64, type=int, help='hidden dimension size of slot MLP')
+    parser.add_argument('--decoder_init_size', default=8, type=int, help='(dinosaur+COCO only) init size for adaptive decoders')
+    parser.add_argument('--decoder_hid_dim', default=64, type=int, help='(dinosaur+COCO only) hidden dimension size of decoder MLP')
+    parser.add_argument('--decoder_num_conv_layers', default=6, type=int, help='(dinosaur+COCO only) number of conv layers in decoder')
+    parser.add_argument('--decoder_type', choices=['adaptive', 'fixed', 'coco-adaptive', 'coco-fixed'], help='(dinosaur+COCO only) type of decoder to use')
     parser.add_argument('--learning_rate', default=0.0004, type=float)
     parser.add_argument('--warmup_steps', default=10000, type=int, help='Number of warmup steps for the learning rate.')
     parser.add_argument('--decay_rate', default=0.5, type=float, help='Rate for the learning rate decay.')
