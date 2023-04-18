@@ -146,6 +146,7 @@ class Decoder(nn.Module):
         x = self.conv5(x)
         x = F.relu(x)
         x = self.conv6(x)
+        assert x.shape[-1] == self.resolution[1]
         x = x.permute(0,2,3,1)
         return x
     
@@ -179,6 +180,7 @@ class MDSpritesDecoder(nn.Module):
         x = self.conv4(x)
 
         # Split channels
+        assert x.shape[-1] == self.resolution[1]
         x = x.permute(0,2,3,1)
         return x
 
@@ -225,6 +227,7 @@ class COCOAdaptiveDecoder(nn.Module):
         x = self.conv(x)
 
         # Split channels
+        assert x.shape[-1] == self.resolution[1]
         x = x.permute(0,2,3,1)
 
         return x
@@ -269,6 +272,7 @@ class COCOFixedDecoder(nn.Module):
         x = self.conv(x)
 
         # Split channels
+        assert x.shape[-1] == self.resolution[1]
         x = x.permute(0,2,3,1)
 
         return x
