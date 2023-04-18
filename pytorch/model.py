@@ -146,7 +146,7 @@ class Decoder(nn.Module):
         x = self.conv5(x)
         x = F.relu(x)
         x = self.conv6(x)
-        x = x[:,:,:self.resolution[0], :self.resolution[1]]
+        assert x.shape[-1] == self.resolution[1]
         x = x.permute(0,2,3,1)
         return x
     
@@ -180,8 +180,101 @@ class MDSpritesDecoder(nn.Module):
         x = self.conv4(x)
 
         # Split channels
-        x = x[:,:,:self.resolution[0], :self.resolution[1]]
+        assert x.shape[-1] == self.resolution[1]
         x = x.permute(0,2,3,1)
+        return x
+
+"""Adaptive Conv Decoder with projection layer"""
+class COCOAdaptiveDecoder(nn.Module):
+    def __init__(self, hid_dim, decoder_hid_dim, resolution, decoder_init_size=(8, 8), num_conv_layers=6):
+        super().__init__()
+        self.decoder_initial_size = decoder_init_size
+        self.decoder_pos = SoftPositionEmbed(hid_dim, self.decoder_initial_size)
+        self.resolution = resolution
+
+        self.proj = nn.Sequential(
+                nn.Linear(hid_dim, decoder_hid_dim),
+                nn.ReLU(),
+                nn.Linear(decoder_hid_dim, decoder_hid_dim),
+                nn.ReLU(),
+                nn.Linear(decoder_hid_dim, decoder_hid_dim)
+            )
+
+        conv_layers = []
+        for i in range(num_conv_layers):
+            if i < num_conv_layers - 2:
+                conv_layers.append(nn.ConvTranspose2d(decoder_hid_dim, decoder_hid_dim, 5, stride=(2, 2), padding=2, output_padding=1))
+                conv_layers.append(nn.ReLU())
+            elif i == num_conv_layers - 2:
+                conv_layers.append(nn.ConvTranspose2d(decoder_hid_dim, decoder_hid_dim, 5, stride=(1, 1), padding=2))
+                conv_layers.append(nn.ReLU())
+            else:
+                conv_layers.append(nn.ConvTranspose2d(decoder_hid_dim, 4, 3, stride=(1, 1), padding=1))
+        self.conv = nn.Sequential(*conv_layers)
+
+    def forward(self, x):
+        # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
+        x = x.reshape((-1, x.shape[-1])).unsqueeze(1).unsqueeze(2)
+        x = x.repeat((1, self.decoder_initial_size[0], self.decoder_initial_size[1], 1))
+
+        # Add position embedding
+        x = self.decoder_pos(x)
+        # Apply projection to convert hid_dim to decoder_hid_dim
+        x = self.proj(x)
+        # [B, H, W, C] -> [B, C, H, W]
+        x = x.permute(0,3,1,2)
+        # Apply conv layers
+        x = self.conv(x)
+
+        # Split channels
+        assert x.shape[-1] == self.resolution[1]
+        x = x.permute(0,2,3,1)
+
+        return x
+
+"""Fixed Conv Decoder with projection layer"""
+class COCOFixedDecoder(nn.Module):
+    def __init__(self, hid_dim, decoder_hid_dim, resolution, num_conv_layers=5):
+        super().__init__()
+        self.decoder_initial_size = resolution
+        self.decoder_pos = SoftPositionEmbed(hid_dim, self.decoder_initial_size)
+        self.resolution = resolution
+
+        self.proj = nn.Sequential(
+                nn.Linear(hid_dim, decoder_hid_dim),
+                nn.ReLU(),
+                nn.Linear(decoder_hid_dim, decoder_hid_dim),
+                nn.ReLU(),
+                nn.Linear(decoder_hid_dim, decoder_hid_dim)
+            )
+
+        conv_layers = []
+        for i in range(num_conv_layers):
+            if i < num_conv_layers - 1:
+                conv_layers.append(nn.ConvTranspose2d(decoder_hid_dim, decoder_hid_dim, 5, stride=(1, 1), padding=2))
+                conv_layers.append(nn.ReLU())
+            else:
+                conv_layers.append(nn.ConvTranspose2d(decoder_hid_dim, 4, 3, stride=(1, 1), padding=1))
+        self.conv = nn.Sequential(*conv_layers)
+
+    def forward(self, x):
+        # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
+        x = x.reshape((-1, x.shape[-1])).unsqueeze(1).unsqueeze(2)
+        x = x.repeat((1, self.decoder_initial_size[0], self.decoder_initial_size[1], 1))
+
+        # Add position embedding
+        x = self.decoder_pos(x)
+        # Apply projection to convert hid_dim to decoder_hid_dim
+        x = self.proj(x)
+        # [B, H, W, C] -> [B, C, H, W]
+        x = x.permute(0,3,1,2)
+        # Apply conv layers
+        x = self.conv(x)
+
+        # Split channels
+        assert x.shape[-1] == self.resolution[1]
+        x = x.permute(0,2,3,1)
+
         return x
 
 
@@ -511,15 +604,27 @@ class DINOSAURProjection(SlotAttentionProjection):
 
         # init dimension of 16 reconstructs 224x224 image, init dimension of 8 reconstructs 128x128 image. Experiment calls for 
         # 128x128 reconstruction, but ViT input is 224x224 so use this larger dimension
-        if opt.dinosaur_downsample:
-            # Update: try 128x128 reconstruction to better utilize GPU memory
-            self.width_init = self.height_init = 8
-            self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
-        elif opt.dinosaur_heavydownsample:
-            self.decoder_cnn = MDSpritesDecoder(self.hid_dim, (64, 64))
-        else:
-            self.width_init = self.height_init = 16
-            self.decoder_cnn = Decoder(self.hid_dim, self.resolution, decoder_init_size=(self.height_init, self.width_init))
+        DecoderBuilder = None
+        kwargs = {'hid_dim': opt.hid_dim, 'resolution': self.resolution}
+        match opt.decoder_type:
+            case 'adaptive':
+                DecoderBuilder = Decoder
+            case 'fixed':
+                DecoderBuilder = MDSpritesDecoder
+            case 'coco-adaptive':
+                DecoderBuilder = COCOAdaptiveDecoder
+                kwargs['decoder_hid_dim'] = opt.decoder_hid_dim
+                kwargs['num_conv_layers'] = opt.decoder_num_conv_layers
+            case 'coco-fixed':
+                DecoderBuilder = COCOFixedDecoder
+                kwargs['decoder_hid_dim'] = opt.decoder_hid_dim
+                kwargs['num_conv_layers'] = opt.decoder_num_conv_layers
+
+        self.width_init = self.height_init = opt.decoder_init_size
+        if 'adaptive' in opt.decoder_type:
+            kwargs['decoder_init_size'] = (self.height_init, self.width_init)
+
+        self.decoder_cnn = DecoderBuilder(**kwargs)
 
     def forward(self, embed, vis_step):
         # Additional MLP to map ViT token dimension to slot dimension
