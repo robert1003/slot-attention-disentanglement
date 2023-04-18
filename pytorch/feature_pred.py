@@ -25,35 +25,54 @@ def main(opt):
 
     # Datasets --> TODO(as) have to adjust this to load images + features
     resolution = (64, 64)
-    assert opt.num_slots == 5, "Invalid number of slots for MultiDSpritesColorBackground"
-    train_set = MultiDSpritesColorFeatures(path=opt.dataset_path, split='train')
+    # assert opt.num_slots == 5, "Invalid number of slots for MultiDSpritesColorBackground"
+    train_set = MultiDSpritesFeatures(path=opt.dataset_path, split='train')
     train_dataloader = torch.utils.data.DataLoader(train_set, batch_size=opt.batch_size,
                             shuffle=True, num_workers=opt.num_workers, pin_memory=True)
     
-    val_set = MultiDSpritesColorFeatures(path=opt.dataset_path, split='val')
+    val_set = MultiDSpritesFeatures(path=opt.dataset_path, split='val')
     val_dataloader = torch.utils.data.DataLoader(val_set, batch_size=opt.batch_size,
                             shuffle=True, num_workers=opt.num_workers, pin_memory=True)
     
-    test_set = MultiDSpritesColorFeatures(path=opt.test_path, split='test')
+    test_set = MultiDSpritesFeatures(path=opt.test_path, split='test')
     test_dataloader = torch.utils.data.DataLoader(test_set, batch_size=opt.batch_size,
                             shuffle=True, num_workers=opt.num_workers)
 
     # Model
     model = MDSpritesFeaturePrediction(opt, resolution).to(device)
 
+    early_stop_cnt = 0
+    CHCKPT_FLAG = 10
+    if os.path.isfile(opt.model_dir):
+        ckpt = torch.load(opt.model_dir, map_location=device)
+        model.load_state_dict(ckpt['model_state_dict'])
+        early_stop_cnt = CHCKPT_FLAG
+
+
+
+    if torch.backends.mps.is_available():
+        # MPS backend has some bug that makes Slot Attention module perform incorrectly (very large/small values)
+        # Only run encoder/decoder on MPS and the rest on CPU to get around this + still have decent performance
+        model.frozen.encoder_cnn = model.frozen.encoder_cnn.to('mps')
+        model.frozen.encoder_cnn.encoder_pos.grid = model.frozen.encoder_cnn.encoder_pos.grid.to('mps')
+        model.frozen.encoder_layer_norm = model.frozen.encoder_layer_norm.to('mps')
+        model.frozen.fc1 = model.frozen.fc1.to('mps')
+        model.frozen.fc2 = model.frozen.fc2.to('mps')
+        model.frozen.decoder_cnn = model.frozen.decoder_cnn.to('mps')
+        model.frozen.decoder_cnn.decoder_pos.grid = model.frozen.decoder_cnn.decoder_pos.grid.to('mps')
+
     # Optimizer
     params = [{'params': model.parameters()}]
     optimizer = optim.Adam(params, lr=opt.learning_rate)
 
     # Training
-    wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
+    # wandb.init(project="slot_attn", config=opt)#(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
     start = time.time()
-    run_id, run_name = wandb.run.id, wandb.run.name
+    # run_id, run_name = wandb.run.id, wandb.run.name
     pbar = tqdm(total=opt.num_train_steps)
     i = 0
     total_loss = 0
     prev_val_loss = -1
-    early_stop_cnt = 0
     pbar.update(i)
     while i < opt.num_train_steps and early_stop_cnt < 3:
         model.train()
@@ -72,6 +91,7 @@ def main(opt):
 
             pred, recon_combined, recons, masks = model(sample['image'].to(device))
             loss, indices = match_loss_calc(pred, sample, device)
+            loss = loss.to(device)
 
             if False:
                 # Visualize image, reconstruction, and slots for subset of images
@@ -93,7 +113,7 @@ def main(opt):
                     print(f"{idx} ({int(sample['valid'][0][idx])}): {indices[0][0][idx]}, {indices[0][1][idx]}")
 
             vis_dict['loss'] = loss
-            wandb.log(vis_dict, step=i)
+            # wandb.log(vis_dict, step=i)
             total_loss += loss.item()
 
             optimizer.zero_grad()
@@ -133,18 +153,20 @@ def main(opt):
 
     # Save trained feature prediction model
     pbar.close()
-    torch.save({
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'step': i,
-            'total_loss': total_loss,
-            'wandb_run_id': run_id,
-            }, opt.model_dir)
+    if early_stop_cnt != CHCKPT_FLAG:
+        # Don't save model if we just loaded from a checkpoint
+        torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'step': i,
+                'total_loss': total_loss,
+                # 'wandb_run_id': run_id,
+                }, opt.model_dir)
 
     # Evaluate on the test set
     eval(model, test_dataloader, device)
 
-    wandb.finish()
+    # wandb.finish()
 
 
 def match_loss_calc(y_pred, sample, device):
@@ -154,19 +176,12 @@ def match_loss_calc(y_pred, sample, device):
     loss_mx = _loss_fn(y_pred, y_numerical, y_categorical)
     loss_per_object, indices = _make_matching(loss_mx, y_valid)
 
-    def _get_ordered_objects(data, indices):
-        # Use index broadcasting. The first indexing tensor has shape (B, 1),
-        # `indices` has shape (B, min(num slots, num objects)).
-        return data[torch.arange(data.shape[0]).unsqueeze(-1), indices]
-
-
-    #y_num_matched = _get_ordered_objects(y_numerical, indices[:, 0])
-    #y_cat_matched = _get_ordered_objects(y_categorical, indices[:, 0])
-    #y_pred_matched = _get_ordered_objects(y_pred, indices[:, 1])
+    # Order valid to match reordered slots, then mask out invalid objects 
+    y_valid = _get_ordered_objects(y_valid.squeeze(-1), indices[:, 0])
+    loss_per_object[~y_valid.bool()] = 0.0
 
     # Calculate average per-object loss in the batch
-    # TODO(as) check this normalization 
-    return loss_per_object.sum() / (y_pred.shape[0] * y_pred.shape[1]), indices
+    return loss_per_object.sum() / y_valid.sum(), indices
 
 
 def _loss_fn(y_pred, y_numerical, y_categorical):
@@ -188,20 +203,32 @@ def _loss_fn(y_pred, y_numerical, y_categorical):
     y_pred = y_pred.unsqueeze(1)
 
     # Evaluate numerical losses
-    num_categories = 4
-    for idx in range(y_pred.shape[2] - num_categories):
-        loss_slots += numerical_criterion(y_numerical[:, :, :, idx].unsqueeze(-1), y_pred[:, :, :, idx].unsqueeze(-1))
+    # Color
+    loss_slots += numerical_criterion(y_numerical[:, :, :, :3], y_pred[:, :, :, :3])
+
+    # Scale
+    loss_slots += numerical_criterion(y_numerical[:, :, :, 3, None], y_pred[:, :, :, 3, None])
+
+    # X
+    loss_slots += numerical_criterion(y_numerical[:, :, :, 4, None], y_pred[:, :, :, 4, None])
+
+    # Y
+    loss_slots += numerical_criterion(y_numerical[:, :, :, 5, None], y_pred[:, :, :, 5, None])
 
     # Evaluate categorical losses
-    loss_slots += categorical_criterion(y_categorical, y_pred[:, :, :, -num_categories:])
+    loss_slots += categorical_criterion(y_categorical, y_pred[:, :, :, 6:])
     return loss_slots
-
 
 
 def _make_matching(loss_matrix, valid):
     # Background/non-visible/non-selected objects are always matched last (high cost).
     cost_matrix = loss_matrix.cpu().clone().detach() * valid + 100000 * (1 - valid)
 
+
+    # Shape of `indices`: (B, 2, num_slots)
+    # - `indices[:, 0]` are the indices of the objects from the loaded dataset,
+    #   and are always in increasing order.
+    # - `indices[:, 1]` are the indices of the model slots.
     _, indices = _hungarian_algorithm(cost_matrix)
 
     # Select matches from the full loss matrix by broadcasting indices.
@@ -253,40 +280,74 @@ def _hungarian_algorithm(cost_matrix):
     return smallest_cost_matrix.to(device), indices.to(device)
 
 
-
-
 def eval(model, test_dataloader, device):
     print("Evaluating trained model on test set...")
     model.eval()
-    if torch.backends.mps.is_available():
-        device = 'mps'
-    model = model.to(device)
 
     results = None
     num_targets = None
     cat_targets = None
     valid_targets = None
     for sample in tqdm(test_dataloader):
-        pred, _, _, _ = model(sample['image'].to(device))
+        pred, recon_combined, recons, masks = model(sample['image'].to(device))
 
         # TODO(as) need to align objects and slots?
+        _, indices = match_loss_calc(pred, sample, device)
+
+        y_numerical, y_categorical, y_valid = sample['numerical'].to(device), sample['categorical'].to(device), sample['valid']
+        y_num_matched = _get_ordered_objects(y_numerical, indices[:, 0])
+        y_cat_matched = _get_ordered_objects(y_categorical, indices[:, 0])
+        y_valid_matched = _get_ordered_objects(y_valid, indices[:, 0])
+        y_pred_matched = _get_ordered_objects(pred, indices[:, 1])
+
+        if False:
+            # Visualize image, reconstruction, and slots for subset of images
+            images_to_show = []
+            img = sample['image'][0].cpu()
+            rec = recons[0].permute(0,3,1,2).cpu().detach()
+            msk = masks[0].permute(0,3,1,2).cpu().detach()
+            images_to_show.append(img)
+            images_to_show.append(recon_combined[0].cpu().detach())
+            for j in range(5):
+                images_to_show.append(rec[j] * msk[j] + (1 - msk[j]))
+            images_to_show = torchvision.utils.make_grid(images_to_show, nrow=5+2).clamp_(0,1)
+            plt.imshow( images_to_show.permute((1, 2, 0)) )
+
+            # Show reshuffling
+            for idx in range(indices.shape[2]):
+                print(f"{idx} -> {indices[0, 0, idx].item()}, {idx} -> {indices[0, 1, idx].item()}")
+
+            # Print predictions
+            for idx in range(5):
+                print(f"SLOT {idx}: ")
+                c_pred = y_pred_matched[:, idx, -4:].argmax(axis=1)
+                c_targets = y_cat_matched[:, idx].argmax(axis=1)
+                print(f"\tShape prediction: {c_pred.detach().numpy()}. GT: {c_targets.detach().numpy()}")
+                print(f"Color prediction: {y_pred_matched[:, idx, :3].detach().numpy()}. GT: {y_num_matched[:, idx, :3].detach().numpy()}")
+                print(f"\tScale prediction: {y_pred_matched[:, idx, 3].detach().numpy()}. GT: {y_num_matched[:, idx, 3].detach().numpy()}")
+                print(f"\tX prediction: {y_pred_matched[:, idx, 4].detach().numpy()}. GT: {y_num_matched[:, idx, 4].detach().numpy()}")
+                print(f"\tY prediction: {y_pred_matched[:, idx, 5].detach().numpy()}. GT: {y_num_matched[:, idx, 5].detach().numpy()}")
+
+                # plt.imshow(y_pred_matched[:, idx, :3].detach().numpy())
+                # plt.imshow(y_num_matched[:, idx, :3].detach().numpy())
+
 
         if results is None:
-            results = pred
-            num_targets = sample['numerical']
-            cat_targets = sample['categorical']
-            valid_targets = sample['valid']
+            results = y_pred_matched
+            num_targets = y_num_matched
+            cat_targets = y_cat_matched
+            valid_targets = y_valid_matched
         else:
-            results = torch.concat((results, pred))
-            num_targets = torch.concat((num_targets, sample['numerical']))
-            cat_targets = torch.concat((cat_targets, sample['categorical']))
-            valid_targets = torch.concat((valid_targets, sample['valid']))
+            results = torch.concat((results, y_pred_matched))
+            num_targets = torch.concat((num_targets, y_num_matched))
+            cat_targets = torch.concat((cat_targets, y_cat_matched))
+            valid_targets = torch.concat((valid_targets, y_valid_matched))
 
 
     # Mask out invalid objects
-    results = results[valid_targets == 1].cpu().detach().numpy()
-    num_targets = num_targets[valid_targets == 1].cpu().detach().numpy()
-    cat_targets = cat_targets[valid_targets == 1].cpu().detach().numpy()
+    results = results[valid_targets.squeeze() == 1].cpu().detach().numpy()
+    num_targets = num_targets[valid_targets.squeeze() == 1].cpu().detach().numpy()
+    cat_targets = cat_targets[valid_targets.squeeze() == 1].cpu().detach().numpy()
 
     # Numerical: # objects x (3 x color, 1 x scale, 1 x 'x', 1 x 'y')
     # Categorical: # objects x (one-hot shape (3 dims.)) --> TODO(as) this should only be 3 but there are 4 classes?
@@ -296,6 +357,7 @@ def eval(model, test_dataloader, device):
     cat_pred = results[:, -4:].argmax(axis=1)
     cat_targets = cat_targets.argmax(axis=1)
 
+    # 3xcolor, scale, x, y, one-hot encoded shape (MISC?, ellipse, heart, square)
     test_acc['shape'] = accuracy_score(cat_targets, cat_pred)
     test_r2['color'] = r2_score(num_targets[:, :3], results[:, :3])
     test_r2['scale'] = r2_score(num_targets[:, 3], results[:, 3])
@@ -309,6 +371,11 @@ def eval(model, test_dataloader, device):
     print(f"Test y R^2: {test_r2['y']}")
 
 
+
+def _get_ordered_objects(data, indices):
+    # Use index broadcasting. The first indexing tensor has shape (B, 1),
+    # `indices` has shape (B, min(num slots, num objects)).
+    return data[torch.arange(data.shape[0]).unsqueeze(-1), indices]
 
 
 

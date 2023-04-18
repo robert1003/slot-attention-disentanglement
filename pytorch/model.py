@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+mps_avail = torch.backends.mps.is_available()
 
 class SlotAttention(nn.Module):
     def __init__(self, num_slots, dim, iters = 3, eps = 1e-8, hidden_dim = 128):
@@ -222,6 +223,8 @@ class SlotAttentionAutoEncoder(nn.Module):
         # `image` has shape: [batch_size, num_channels, width, height].
 
         # Convolutional encoder with position embedding.
+        if mps_avail:
+            image = image.to('mps')
         x = self.encoder_cnn(image)  # CNN Backbone.
         #x = nn.LayerNorm(x.shape[1:]).to(device)(x)
         x = self.encoder_layer_norm(x)
@@ -229,10 +232,16 @@ class SlotAttentionAutoEncoder(nn.Module):
         x = F.relu(x)
         x = self.fc2(x)  # Feedforward network on set.
         # `x` has shape: [batch_size, width*height, input_size].
+        if mps_avail:
+            x = x.to('cpu')
 
         # Slot Attention module.
         slots_rep = self.slot_attention(x)
         # `slots_rep` has shape: [batch_size, num_slots, slot_size].
+
+        if mps_avail:
+            slots_rep = slots_rep.to('mps')
+        
         
         # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
         x = self.decoder_cnn(slots_rep)
@@ -252,6 +261,9 @@ class SlotAttentionAutoEncoder(nn.Module):
         if self.sigmoid:
             # Normalize reconstruction to 0-1 range
             recon_combined = torch.nn.functional.sigmoid(recon_combined)
+
+        if mps_avail:
+            slots_rep = slots_rep.cpu()
 
         return recon_combined, recons, masks, slots_rep
 
@@ -424,9 +436,9 @@ class MDSpritesFeaturePrediction(nn.Module):
 
         # Load and freeze pretrained model
         if opt.base:
-            self.frozen = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=False, mdsprites=True).to(device)
+            self.frozen = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=False, mdsprites=True)
         else:
-            self.frozen = SlotAttentionProjection(resolution, opt, vis=False, mdsprites=True).to(device)
+            self.frozen = SlotAttentionProjection(resolution, opt, vis=False, mdsprites=True)
         ckpt = torch.load(opt.model_ckpt, map_location=device)
         self.frozen.load_state_dict(ckpt['model_state_dict'])
 
@@ -436,7 +448,10 @@ class MDSpritesFeaturePrediction(nn.Module):
 
         # One hidden dimension MLP (performs just as well as MLP with more layers, https://arxiv.org/pdf/2107.00637.pdf Figure 14)
         self.prediction_head = nn.Sequential(
+            # nn.LayerNorm(opt.hid_dim),          # TODO: not in the paper
             nn.Linear(opt.hid_dim, 256),
+            # nn.LeakyReLU(),
+            # nn.Linear(256, 256),
             nn.LeakyReLU(),
             nn.Linear(256, 10),       # 3xcolor, scale, x, y, one-hot encoded shape (MISC?, ellipse, heart, square)
         )
@@ -444,10 +459,12 @@ class MDSpritesFeaturePrediction(nn.Module):
 
 
     def forward(self, x):
+        if mps_avail:
+            x = x.to("mps")
         if self.base:
-            recon_combined, recons, masks, x, _ = self.frozen(x)
+            recon_combined, recons, masks, x = self.frozen(x)
         else:
             recon_combined, recons, masks, x, _ = self.frozen(x, False)
-        return self.prediction_head(x), recon_combined, recons, masks
+        return self.prediction_head(x).cpu(), recon_combined, recons, masks
 
 

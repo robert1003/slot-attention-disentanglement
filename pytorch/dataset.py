@@ -190,12 +190,14 @@ class MultiDSpritesColorBackground(Dataset):
 
 
 
-class MultiDSpritesColorFeatures(Dataset):
+class MultiDSpritesFeatures(Dataset):
     """Dataset for Multi-dSprites (colored on colored) feature prediction task."""
     def __init__(self, path='./data/multi_dsprites/processed', split='train'):
-        super(MultiDSpritesColorFeatures, self).__init__()
+        super(MultiDSpritesFeatures, self).__init__()
         self.root_dir = path
         self.files = [i for i in os.listdir(self.root_dir) if 'image' in i]
+
+        # TODO: calculate mean and variance for each numerical feature to normalize all input features --> datasets.py line 592
         
         # https://arxiv.org/pdf/2107.00637.pdf pg25
         assert split in ['train', 'val', 'test']
@@ -210,7 +212,29 @@ class MultiDSpritesColorFeatures(Dataset):
             self.files = self.files[:2000]
             assert len(self.files) == 2000, "Invalid number of test set files."
         else:
-            assert False, "Invalid split given to MultiDSpritesColorFeatures"
+            assert False, "Invalid split given to MultiDSpritesFeatures"
+
+
+        # Collect all features in the given dataset
+        feature_collect = {i : None for i in ['color', 'scale','x', 'y']}
+        for fp in self.files:
+            feature_path = os.path.join(self.root_dir, fp.split('/')[-1].split('_')[0] + "_feature.pkl")
+            with open(feature_path, "rb") as fd:
+                feature_dict = pickle.load(fd)
+
+            if feature_collect['color'] is None:
+                feature_collect['color'] = torch.from_numpy(feature_dict['color'])
+                feature_collect['scale'] = torch.from_numpy(feature_dict['scale'])
+                feature_collect['x'] = torch.from_numpy(feature_dict['x'])
+                feature_collect['y'] = torch.from_numpy(feature_dict['y'])
+            else:
+                feature_collect['color'] = torch.concat((feature_collect['color'], torch.from_numpy(feature_dict['color'])))
+                feature_collect['scale'] = torch.concat((feature_collect['scale'], torch.from_numpy(feature_dict['scale'])))
+                feature_collect['x'] = torch.concat((feature_collect['x'], torch.from_numpy(feature_dict['x'])))
+                feature_collect['y'] = torch.concat((feature_collect['y'], torch.from_numpy(feature_dict['y'])))
+
+        # Calculate normalization statistics for each numerical feature
+        self.feature_norm = {i : {"mean":torch.mean(feature_collect[i]).numpy(), "var":torch.var(feature_collect[i]).numpy()} for i in ['color', 'scale','x', 'y']}
 
         self.img_transform = transforms.Compose([transforms.ToTensor()])
 
@@ -240,14 +264,26 @@ class MultiDSpritesColorFeatures(Dataset):
         feature_path = os.path.join(self.root_dir, index + "_feature.pkl")
         with open(feature_path, "rb") as fd:
             feature_dict = pickle.load(fd)
-                
-        # Numerical: # objects x (3 x color, 1 x scale, 1 x 'x', 1 x 'y')
-        numerical = torch.from_numpy(np.concatenate((feature_dict['color'], 
-                                                     np.expand_dims(feature_dict['scale'], 1),
-                                                     np.expand_dims(feature_dict['x'], 1),
-                                                     np.expand_dims(feature_dict['y'], 1)), axis=1))
 
-        # Categorical: # objects x (one-hot shape (3 dims.)) --> TODO(as) this should only be 3 but there are 4 classes?
+
+
+
+                
+        # numerical = torch.from_numpy(np.concatenate((feature_dict['color'], 
+        #                                              np.expand_dims(feature_dict['scale'], 1),
+        #                                              np.expand_dims(feature_dict['x'], 1),
+        #                                              np.expand_dims(feature_dict['y'], 1)), axis=1))
+
+        # Numerical: # objects x (3 x color, 1 x scale, 1 x 'x', 1 x 'y')
+        numerical = torch.concat(( self._normalize_numerical_feature(feature_dict['color'], 'color'), 
+                                  self._normalize_numerical_feature(feature_dict['scale'], 'scale').unsqueeze(-1),
+                                  self._normalize_numerical_feature(feature_dict['x'], 'x').unsqueeze(-1),
+                                  self._normalize_numerical_feature(feature_dict['y'], 'y').unsqueeze(-1),
+                                  ), dim=1)
+
+
+
+        # Categorical: # objects x (one-hot shape (4 dims.))
         tens = torch.from_numpy(feature_dict['shape']).long()
         categorical = torch.nn.functional.one_hot(tens, num_classes=4).float()
 
@@ -255,9 +291,25 @@ class MultiDSpritesColorFeatures(Dataset):
         vis = torch.from_numpy(feature_dict['visibility'])
 
         # Remove background (only train/test on foreground objects)
+        # TODO(as) not sure how to handle this....
+
+        # Set background object to 0?
         vis[0] = 0
 
+        # Removes background object entirely
+        # vis = vis[1:]
+        # numerical = numerical[1:]
+        # categorical = categorical[1:]
+
+        if len(vis.shape) == 1:
+            vis = vis.unsqueeze(-1)
+
         return numerical, categorical, vis
+    
+    def _normalize_numerical_feature(self, data, name):
+        mean = self.feature_norm[name]['mean'].astype("float32")
+        std = np.sqrt(self.feature_norm[name]['var']).astype("float32")
+        return torch.as_tensor((data - mean) / (std + 1e-6), dtype=torch.float32)
 
 
 

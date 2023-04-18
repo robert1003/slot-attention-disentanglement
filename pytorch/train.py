@@ -70,7 +70,7 @@ def main(opt):
         total_loss = ckpt['total_loss']
         wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt, id=ckpt['wandb_run_id'], resume="must")
     else:
-        wandb.init(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
+        wandb.init(project='slot_attn', config=opt)#(project="vlr_slot_attn", entity="vlr-slot-attn", config=opt)
         i = 0
         total_loss = 0
 
