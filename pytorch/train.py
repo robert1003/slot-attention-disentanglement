@@ -124,11 +124,25 @@ def main(opt):
                 cov_weight = opt.cov_weight * (i / opt.cov_warmup)
             else:
                 cov_weight = opt.cov_weight
+
+            if i < opt.info_nce_warmup:
+                info_nce_weight = opt.info_nce_weight * (i / opt.info_nce_warmup)
+            else:
+                info_nce_weight = opt.info_nce_weight
             
             if opt.base:
                 recon_combined, recons, masks, slots = model(image)
                 loss = criterion(recon_combined, image)
-            else: 
+            elif opt.info_nce:
+                recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
+                info_nce_loss = proj_loss_dict["info_nce_loss"]
+                recon_loss = criterion(recon_combined, image)
+                loss = info_nce_weight * info_nce_loss + recon_loss
+
+                vis_dict['info_nce_weight'] = info_nce_weight
+                vis_dict['recon_loss'] = recon_loss.item()
+                vis_dict['info_nce_loss'] = info_nce_loss.item()
+            else:
                 if opt.dinosaur:
                     embedding = sample['embedding'].to(device)
                     recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, vis_step)
@@ -143,8 +157,10 @@ def main(opt):
                     recon_loss = criterion(recon_combined, image)
                 proj_loss *= opt.proj_weight
                 loss = recon_loss + proj_loss
+
                 vis_dict['recon_loss'] = recon_loss.item()
                 vis_dict['std_loss'] = proj_loss_dict['std_loss'].item()
+                vis_dict['cov_weight'] = cov_weight
                 vis_dict['cov_loss'] = proj_loss_dict['cov_loss'].item()
 
                 # Visualize covariance loss with all weighting to make hyperparameter tuning easier
@@ -224,7 +240,8 @@ def main(opt):
 
 def visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots, proj_loss_dict, train_set):
     """Add visualizations to the dictionary to be logged with W&B"""
-    if not opt.base:
+    image = sample['image']
+    if not opt.base and not opt.info_nce:
         # Visualize projection space covariance matrix and feature std. dev. as heat maps
         # Resues proj_loss_dict from last step since model does not use projection head in eval
         plt.figure(figsize=(10,10))
@@ -338,6 +355,10 @@ if __name__ == "__main__":
     parser.add_argument('--std_target', default=1.0, type=float, help='target std. deviation for each projection space dimension')
     parser.add_argument('--cov-div-sq', action='store_true', help='divide projection head covariance by the square of the number of projection dimensions')
     parser.add_argument('--slot-cov', action='store_true', help='calculate covariance over slots rather than over projection feature dimension')
+    parser.add_argument('--info-nce', action='store_true', help='use InfoNCE style loss instead of cov loss')
+    parser.add_argument('--temperature', default=0.1, type=float, help='temperature used for info-nce loss')
+    parser.add_argument('--info-nce-weight', default=0.1, type=float, help='weight given to the info nce loss')
+    parser.add_argument('--info-nce-warmup', default=5000, type=float, help='number of warup steps for the infonce loss')
     parser.add_argument('--cov-warmup', default=0, type=int, help='number of warmup steps for the covariance loss')
     parser.add_argument('--bce-loss', action='store_true', help='calculate the reconstruction loss using binary cross entropy rather than mean squared error')
     parser.add_argument('--identity-proj', action='store_true', help='set projection to identity function. This option is equivalent to applying var/cov regularization on slot vectors directly')
