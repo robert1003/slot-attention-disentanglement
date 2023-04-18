@@ -331,8 +331,10 @@ class ProjectionHead(nn.Module):
 
         
         if self.info_nce:
-            # formula: log (\sum_k, k != i exp(<z_i, z_k> / temperature))
-            cosine_similarity = torch.matmul(projection, projection.permute(0, 2, 1)) / self.temperature
+            # formula: log (\sum_k, k != i exp(<z_i, z_k> / norm(z_i) / norm(z_k) / temperature))
+            norm = projection.norm(dim=2, keepdim=True)
+            cosine_similarity = torch.matmul(projection, projection.permute(0, 2, 1)) / norm / norm.permute(0, 2, 1)
+            cosine_similarity /= self.temperature
             # `cosine_similarity` has shape: [batch_size, num_slots, num_slots]
 
             # set diagonal to -inf since we need to exclude self similarity calculation
