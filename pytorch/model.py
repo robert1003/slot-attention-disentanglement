@@ -386,7 +386,6 @@ class ProjectionHead(nn.Module):
         self.vis = vis
         self.cov_over_slots = opt.slot_cov
         self.info_nce = opt.info_nce
-        self.temperature = opt.temperature
 
         if opt.cov_div_sq:
             self.cov_div = self.proj_dim**2
@@ -426,19 +425,24 @@ class ProjectionHead(nn.Module):
 
         
         if self.info_nce:
-            # formula: log (\sum_k, k != i exp(<z_i, z_k> / norm(z_i) / norm(z_k) / temperature))
-            norm = projection.norm(dim=2, keepdim=True)
-            cosine_similarity = torch.matmul(projection, projection.permute(0, 2, 1)) / norm / norm.permute(0, 2, 1)
-            cosine_similarity /= self.temperature
-            # `cosine_similarity` has shape: [batch_size, num_slots, num_slots]
+            batch_size, num_slots, proj_dim = projection.shape
+            proj = projection.repeat(1, num_slots, 1)
+            # `proj` has shape: [batch_size, num_slots*num_slots, proj_dim]
+            proj2 = projection.repeat(1, 1, num_slots).reshape(batch_size, num_slots*num_slots, proj_dim)
+            # `proj2` has shape: [batch_size, num_slots*num_slots, proj_dim]
+            target = -torch.ones(num_slots*num_slots).to(device)
+            for i in range(num_slots):
+                target[num_slots*i+i] = 1
+            # `target` has shape: [num_slots*num_slots,]
 
-            # set diagonal to -inf since we need to exclude self similarity calculation
-            batch_size = cosine_similarity.shape[0]
-            num_slots = cosine_similarity.shape[1]
-            mask = torch.eye(num_slots).repeat(batch_size, 1, 1).bool()
-            cosine_similarity[mask] = -1e9
-            info_nce_loss = torch.logsumexp(cosine_similarity, dim=(1,2)) / (num_slots**2)
-            info_nce_loss = torch.mean(info_nce_loss)
+            proj = proj.view(-1, proj_dim)
+            # `proj` has shape: [batch_size*num_slots*num_slots, proj_dim]
+            proj2 = proj2.view(-1, proj_dim)
+            # `proj2` has shape: [batch_size*num_slots*num_slots, proj_dim]
+            target = target.repeat(batch_size)
+            # `target` has shape: [batch_size*num_slots*num_slots,]
+
+            info_nce_loss = torch.nn.functional.cosine_embedding_loss(proj, proj2, target, margin=0.2)
         elif self.cov_over_slots:
             # Calculate covariance over slots loss for each image separately, then take average. Same for std loss.
             # Take mean over feature dimension for each slot of each batch (separately)

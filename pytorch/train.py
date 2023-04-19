@@ -383,7 +383,6 @@ if __name__ == "__main__":
     parser.add_argument('--cov-div-sq', action='store_true', help='divide projection head covariance by the square of the number of projection dimensions')
     parser.add_argument('--slot-cov', action='store_true', help='calculate covariance over slots rather than over projection feature dimension')
     parser.add_argument('--info-nce', action='store_true', help='use InfoNCE style loss instead of cov loss')
-    parser.add_argument('--temperature', default=0.1, type=float, help='temperature used for info-nce loss')
     parser.add_argument('--info-nce-weight', default=0.1, type=float, help='weight given to the info nce loss')
     parser.add_argument('--info-nce-warmup', default=5000, type=float, help='number of warup steps for the infonce loss')
     parser.add_argument('--cov-warmup', default=0, type=int, help='number of warmup steps for the covariance loss')
