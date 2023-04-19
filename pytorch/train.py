@@ -343,7 +343,7 @@ def visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots
                 num_pad = gt_mask.shape[1] - pred_mask.shape[0]
                 if num_pad > 0:
                     padding = torch.zeros((num_pad, pred_mask.shape[1], pred_mask.shape[2], 1))
-                    pred_mask = torch.concat((pred_mask, padding), dim=0)
+                    pred_mask = torch.concat((pred_mask.cpu(), padding), dim=0)
                 
                 flattened_masks = torch.flatten(pred_mask, start_dim=1, end_dim=3)
                 flattened_masks = torch.permute(flattened_masks, (1, 0))
