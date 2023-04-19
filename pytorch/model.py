@@ -331,19 +331,23 @@ class ProjectionHead(nn.Module):
         
         if self.info_nce:
             batch_size, num_slots, proj_dim = projection.shape
-            projection = projection.repeat(1, num_slots, 1)
-            # `projection` has shape: [batch_size, num_slots*num_slots, proj_dim]
+            proj = projection.repeat(1, num_slots, 1)
+            # `proj` has shape: [batch_size, num_slots*num_slots, proj_dim]
+            proj2 = projection.repeat(1, 1, num_slots).reshape(batch_size, num_slots*num_slots, proj_dim)
+            # `proj2` has shape: [batch_size, num_slots*num_slots, proj_dim]
             target = -torch.ones(num_slots*num_slots).to(device)
             for i in range(num_slots):
                 target[num_slots*i+i] = 1
             # `target` has shape: [num_slots*num_slots,]
 
-            projection = projection.view(-1, proj_dim)
-            # `projection` has shape: [batch_size*num_slots*num_slots, proj_dim]
+            proj = proj.view(-1, proj_dim)
+            # `proj` has shape: [batch_size*num_slots*num_slots, proj_dim]
+            proj2 = proj2.view(-1, proj_dim)
+            # `proj2` has shape: [batch_size*num_slots*num_slots, proj_dim]
             target = target.repeat(batch_size)
             # `target` has shape: [batch_size*num_slots*num_slots,]
 
-            info_nce_loss = torch.nn.functional.cosine_embedding_loss(projection, projection, target)
+            info_nce_loss = torch.nn.functional.cosine_embedding_loss(proj, proj2, target, margin=0.2)
         elif self.cov_over_slots:
             # Calculate covariance over slots loss for each image separately, then take average. Same for std loss.
             # Take mean over feature dimension for each slot of each batch (separately)
