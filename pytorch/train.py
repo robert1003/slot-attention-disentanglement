@@ -89,14 +89,11 @@ def main(opt):
         with torch.no_grad():
             if opt.base:
                 summary(model, input_data=image)
-            elif opt.info_nce:
-                summary(model, input_data=(image, True))
+            elif opt.dinosaur:
+                embedding = sample['embedding'].to(device)
+                summary(model, input_data=(embedding, True))
             else:
-                if opt.dinosaur:
-                    embedding = sample['embedding'].to(device)
-                    summary(model, input_data=(embedding, True))
-                else:
-                    summary(model, input_data=(image, True))
+                summary(model, input_data=(image, True))
 
     start = time.time()
 
@@ -159,9 +156,19 @@ def main(opt):
                 recon_combined, recons, masks, slots = model(image)
                 loss = criterion(recon_combined, image)
             elif opt.info_nce:
-                recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
+                if opt.dinosaur:
+                    embedding = sample['embedding'].to(device)
+                    recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, vis_step)
+                else:
+                    recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
+                if opt.dinosaur:
+                    # Move reconstruction onto CPU for loss calculation, then back to GPU for backprop.
+                    # Avoids every putting image on GPU, allowing for larger batch sizes
+                    recon_loss = criterion(recon_combined.cpu(), image).to(device)
+                else:
+                    recon_loss = criterion(recon_combined, image)
+
                 info_nce_loss = proj_loss_dict["info_nce_loss"]
-                recon_loss = criterion(recon_combined, image)
                 loss = info_nce_weight * info_nce_loss + recon_loss
 
                 vis_dict['info_nce_weight'] = info_nce_weight
