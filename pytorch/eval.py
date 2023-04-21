@@ -4,25 +4,39 @@ from dataset import *
 from model import *
 from tqdm import tqdm
 from metrics import adjusted_rand_index
+from torchinfo import summary
 
 def main(opt):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     resolution = (128, 128)
 
-    if opt.dataset == "clevr":
-        test_set = CLEVR(path=opt.dataset_path, split="test",
+    if opt.dinosaur:
+        # Resolution is hard-coded by the frozen ViT input dimensions
+        resolution = (224, 224)
+        downsample_dim = 0
+        if opt.dinosaur_downsample:
+            resolution = (128, 128)
+            downsample_dim = 128
+        elif opt.dinosaur_heavydownsample:
+            resolution = (64, 64)
+            downsample_dim = 64
+        test_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, 
+                                       split='val', resolution=resolution, dynamic_load=opt.coco_mask_dynamic,
+                                       downsample_mask=downsample_dim)
+    elif opt.dataset == "clevr":
+        val_set = CLEVR(path=opt.dataset_path, split="val",
                 rescale=opt.dataset_rescale)
         mdsprites = False
     elif opt.dataset == 'multid-gray':
-        assert opt.num_slots == 6, "Invalid number of slots for MultiDSpritesGrayBackground"
         assert "test" in opt.dataset_path
+        assert opt.num_slots == 6, "Invalid number of slots for MultiDSpritesGrayBackground"
         test_set = MultiDSpritesGrayBackground(path=opt.dataset_path,
                 rescale=opt.dataset_rescale)
         resolution = (64, 64)
         mdsprites = True
     else:
-        assert opt.num_slots == 5, "Invalid number of slots for MultiDSpritesColorBackground"
         assert "test" in opt.dataset_path
+        assert opt.num_slots == 5, "Invalid number of slots for MultiDSpritesColorBackground"
         test_set = MultiDSpritesColorBackground(path=opt.dataset_path,
                 rescale=opt.dataset_rescale)
         resolution = (64, 64)
@@ -30,21 +44,46 @@ def main(opt):
 
     if opt.base:
         model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss, mdsprites=mdsprites).to(device)
+    elif opt.dinosaur:
+        # Hidden dimension must be dimension of ViT encoding for each token
+        model = DINOSAURProjection(resolution, opt, vis=opt.vis_freq > 0).to(device)
     else:
         model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0, mdsprites=mdsprites).to(device)
-
-    test_dataloader = torch.utils.data.DataLoader(test_set, batch_size=opt.batch_size, shuffle=False, num_workers=opt.num_workers, pin_memory=True)
 
     ckpt = torch.load(opt.model_dir)
     model.load_state_dict(ckpt['model_state_dict'])
     model.eval()
 
+    test_dataloader = torch.utils.data.DataLoader(test_set, batch_size=opt.batch_size,
+                            shuffle=True, num_workers=opt.num_workers, pin_memory=True)
+
+    first = True
     ari = []
-    for sample in test_dataloader:
+    for sample in tqdm(test_dataloader):
         image = sample['image'].to(device)
+        if not opt.dinosaur:
+            image = image.to(device)
+        if opt.dinosaur_downsample:
+            image = torch.nn.functional.interpolate(image, size=(128, 128))
+        elif opt.dinosaur_heavydownsample:
+            image = torch.nn.functional.interpolate(image, size=(64, 64))
+
+        if first and opt.print_model:
+            if opt.base:
+                summary(model, input_data=image)
+            elif opt.dinosaur:
+                embedding = sample['embedding'].to(device)
+                summary(model, input_data=(embedding, True))
+            else:
+                summary(model, input_data=(image, True))
+
         if opt.base:
             recon_combined, recons, masks, slots = model(image)
-        else: 
+        elif opt.dinosaur:
+            embedding = sample['embedding'].to(device)
+            embedding = sample['embedding'].to(device)
+            recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, True)
+        else:
             recon_combined, recons, masks, slots, proj_loss_dict = model(image, False)
 
         if opt.dataset_rescale:
@@ -63,11 +102,16 @@ def main(opt):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--print_model', action='store_true', help='print model structure')
     parser.add_argument('--model_dir', default='./tmp/model10.ckpt', type=str, help='where to save models' )
     parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--num_slots', default=7, type=int, help='Number of slots in Slot Attention.')
     parser.add_argument('--num_iterations', default=3, type=int, help='Number of attention iterations.')
-    parser.add_argument('--hid_dim', default=64, type=int, help='hidden dimension size')
+    parser.add_argument('--hid_dim', default=64, type=int, help='hidden dimension size of slot MLP')
+    parser.add_argument('--decoder_init_size', default=8, type=int, help='(dinosaur+COCO only) init size for adaptive decoders')
+    parser.add_argument('--decoder_hid_dim', default=64, type=int, help='(dinosaur+COCO only) hidden dimension size of decoder MLP')
+    parser.add_argument('--decoder_num_conv_layers', default=6, type=int, help='(dinosaur+COCO only) number of conv layers in decoder')
+    parser.add_argument('--decoder_type', choices=['adaptive', 'fixed', 'coco-adaptive', 'coco-fixed'], help='(dinosaur+COCO only) type of decoder to use')
     parser.add_argument('--learning_rate', default=0.0004, type=float)
     parser.add_argument('--warmup_steps', default=10000, type=int, help='Number of warmup steps for the learning rate.')
     parser.add_argument('--decay_rate', default=0.5, type=float, help='Rate for the learning rate decay.')
@@ -93,6 +137,12 @@ if __name__ == '__main__':
     parser.add_argument('--bce-loss', action='store_true', help='calculate the reconstruction loss using binary cross entropy rather than mean squared error')
     parser.add_argument('--identity-proj', action='store_true', help='set projection to identity function. This option is equivalent to applying var/cov regularization on slot vectors directly')
     parser.add_argument('--dataset-rescale', action='store_true', help='by default image is rescaled from [0,255] to [0,1]. This option enables rescale from [0,255] to [-1,1]. This option the one used in original Slot Attention paper')
+    parser.add_argument('--dinosaur', action='store_true', help='run projection head SA on top of frozen ViT embeddings')
+    parser.add_argument('--embed_path', default="./data/coco/embedding", type=str, help='path to pre-generated COCO 2017 embeddings')
+    parser.add_argument('--coco-mask-dynamic', action='store_true', help='load COCO masks only when they are needed for ARI calculation')
+    parser.add_argument('--grad-clip', default=-1, type=float, help='Level of grad norm clipping to use. <0 to disable.')
     parser.add_argument('--proj-layernorm', action='store_true', help='use layernorm in projection layer (default is batchnorm)')
+    parser.add_argument('--dinosaur-downsample', action='store_true', help='run DINOSAUR experiment with (128, 128) resolution rather than (224, 224)')
+    parser.add_argument('--dinosaur-heavydownsample', action='store_true', help='run DINOSAUR experiment with (64, 64) resolution rather than (224, 224)')
 
     main(parser.parse_args())
