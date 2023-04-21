@@ -77,6 +77,8 @@ def main(opt):
             else:
                 summary(model, input_data=(image, True))
 
+            first = False
+
         if opt.base:
             recon_combined, recons, masks, slots = model(image)
         elif opt.dinosaur:
