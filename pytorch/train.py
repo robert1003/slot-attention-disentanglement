@@ -26,7 +26,20 @@ def main(opt):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     resolution = (128, 128)
 
-    if opt.dataset == "clevr":
+    if opt.dinosaur:
+        # Resolution is hard-coded by the frozen ViT input dimensions
+        resolution = (224, 224)
+        downsample_dim = 0
+        if opt.dinosaur_downsample:
+            resolution = (128, 128)
+            downsample_dim = 128
+        elif opt.dinosaur_heavydownsample:
+            resolution = (64, 64)
+            downsample_dim = 64
+        train_set = COCO2017Embeddings(data_path=opt.dataset_path, embed_path=opt.embed_path, 
+                                       split='train', resolution=resolution, dynamic_load=opt.coco_mask_dynamic,
+                                       downsample_mask=downsample_dim)
+    elif opt.dataset == "clevr":
         train_set = CLEVR(path=opt.dataset_path, split="train",
                 rescale=opt.dataset_rescale)
         mdsprites = False
@@ -45,6 +58,9 @@ def main(opt):
 
     if opt.base:
         model = SlotAttentionAutoEncoder(resolution, opt.num_slots, opt.num_iterations, opt.hid_dim, sigmoid=opt.bce_loss, mdsprites=mdsprites).to(device)
+    elif opt.dinosaur:
+        # Hidden dimension must be dimension of ViT encoding for each token
+        model = DINOSAURProjection(resolution, opt, vis=opt.vis_freq > 0).to(device)
     else:
         model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0, mdsprites=mdsprites).to(device)
 
@@ -58,6 +74,26 @@ def main(opt):
     train_dataloader = torch.utils.data.DataLoader(train_set, batch_size=opt.batch_size,
                             shuffle=True, num_workers=opt.num_workers, pin_memory=True)
     optimizer = optim.Adam(params, lr=opt.learning_rate)
+
+    if opt.print_model:
+        from torchinfo import summary
+        sample = next(iter(train_dataloader))
+        image = sample['image']
+        if not opt.dinosaur:
+            image = image.to(device)
+        if opt.dinosaur_downsample:
+            image = torch.nn.functional.interpolate(image, size=(128, 128))
+        elif opt.dinosaur_heavydownsample:
+            image = torch.nn.functional.interpolate(image, size=(64, 64))
+
+        with torch.no_grad():
+            if opt.base:
+                summary(model, input_data=image)
+            elif opt.dinosaur:
+                embedding = sample['embedding'].to(device)
+                summary(model, input_data=(embedding, True))
+            else:
+                summary(model, input_data=(image, True))
 
     start = time.time()
 
@@ -97,7 +133,13 @@ def main(opt):
 
             learning_rate = learning_rate * (opt.decay_rate ** (i / opt.decay_steps))
             optimizer.param_groups[0]['lr'] = learning_rate
-            image = sample['image'].to(device)
+            image = sample['image']
+            if not opt.dinosaur:
+                image = image.to(device)
+            if opt.dinosaur_downsample:
+                image = torch.nn.functional.interpolate(image, size=(128, 128))
+            elif opt.dinosaur_heavydownsample:
+                image = torch.nn.functional.interpolate(image, size=(64, 64))
             vis_dict['learning_rate'] = learning_rate
 
             if i < opt.cov_warmup:
@@ -114,18 +156,37 @@ def main(opt):
                 recon_combined, recons, masks, slots = model(image)
                 loss = criterion(recon_combined, image)
             elif opt.info_nce:
-                recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
+                if opt.dinosaur:
+                    embedding = sample['embedding'].to(device)
+                    recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, vis_step)
+                else:
+                    recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
+                if opt.dinosaur:
+                    # Move reconstruction onto CPU for loss calculation, then back to GPU for backprop.
+                    # Avoids every putting image on GPU, allowing for larger batch sizes
+                    recon_loss = criterion(recon_combined.cpu(), image).to(device)
+                else:
+                    recon_loss = criterion(recon_combined, image)
+
                 info_nce_loss = proj_loss_dict["info_nce_loss"]
-                recon_loss = criterion(recon_combined, image)
                 loss = info_nce_weight * info_nce_loss + recon_loss
 
                 vis_dict['info_nce_weight'] = info_nce_weight
                 vis_dict['recon_loss'] = recon_loss.item()
                 vis_dict['info_nce_loss'] = info_nce_loss.item()
             else:
-                recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
+                if opt.dinosaur:
+                    embedding = sample['embedding'].to(device)
+                    recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, vis_step)
+                else:
+                    recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
                 proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + cov_weight * proj_loss_dict["cov_loss"]
-                recon_loss = criterion(recon_combined, image)
+                if opt.dinosaur:
+                    # Move reconstruction onto CPU for loss calculation, then back to GPU for backprop.
+                    # Avoids every putting image on GPU, allowing for larger batch sizes
+                    recon_loss = criterion(recon_combined.cpu(), image).to(device)
+                else:
+                    recon_loss = criterion(recon_combined, image)
                 proj_loss *= opt.proj_weight
                 loss = recon_loss + proj_loss
 
@@ -160,9 +221,9 @@ def main(opt):
                     recons = (recons + 1.) / 2.
 
                 if not opt.base:
-                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict)
+                    vis_dict = visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots, proj_loss_dict, train_set)
                 else:
-                    vis_dict = visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, None)
+                    vis_dict = visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots, None, train_set)
             wandb.log(vis_dict, step=i)
             
             total_loss += loss.item()
@@ -170,6 +231,8 @@ def main(opt):
 
             optimizer.zero_grad()
             loss.backward()
+            if opt.grad_clip >= 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), opt.grad_clip)
             optimizer.step()
 
             if vis_step:
@@ -207,7 +270,7 @@ def main(opt):
 
 
 
-def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_loss_dict):
+def visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots, proj_loss_dict, train_set):
     """Add visualizations to the dictionary to be logged with W&B"""
     image = sample['image']
     if not opt.base and not opt.info_nce:
@@ -264,23 +327,50 @@ def visualize(vis_dict, opt, sample, recon_combined, recons, masks, slots, proj_
         vis_dict['proj_input_norm'] = proj_loss_dict['proj_input_norm']
 
     # Visualize ARI performance
-    if 'mask' in sample:
-        flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
-        flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
-        vis_dict['ari'] = adjusted_rand_index(sample['mask'].to(device), flattened_masks.to(device)).mean().item()
+    if 'mask' in sample or opt.coco_mask_dynamic:
+        if 'mask' in sample:
+            if opt.dinosaur:
+                # Pad predicted masks to match number of GT masks
+                num_pad = train_set.max_obj_per_image - masks.shape[1]
+                if num_pad > 0:
+                    padding = torch.zeros((masks.shape[0], num_pad, masks.shape[2], masks.shape[3], 1)).to(device)
+                    masks = torch.concat((masks, padding), dim=1)
+
+            flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
+            flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
+            vis_dict['ari'] = adjusted_rand_index(sample['mask'].to(device), flattened_masks.to(device)).mean().item()
+        else:
+            ari_sum = 0
+            for idx in range(sample['id'].shape[0]):
+                # Load ground truth mask for a single sample
+                gt_mask = train_set.load_mask(sample['id'][idx].item())
+                pred_mask = masks[idx]
+
+                # Pad predicted masks to match number of GT masks
+                num_pad = gt_mask.shape[1] - pred_mask.shape[0]
+                if num_pad > 0:
+                    padding = torch.zeros((num_pad, pred_mask.shape[1], pred_mask.shape[2], 1))
+                    pred_mask = torch.concat((pred_mask.cpu(), padding), dim=0)
+                
+                flattened_masks = torch.flatten(pred_mask, start_dim=1, end_dim=3)
+                flattened_masks = torch.permute(flattened_masks, (1, 0))
+                ari_sum += adjusted_rand_index(gt_mask.to(device).unsqueeze(0), flattened_masks.to(device).unsqueeze(0)).item()
+            vis_dict['ari'] = ari_sum / sample['id'].shape[0]
 
     return vis_dict
 
-
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument('--print_model', action='store_true', help='print model structure')
     parser.add_argument('--model_dir', default='./tmp/model10.ckpt', type=str, help='where to save models' )
     parser.add_argument('--batch_size', default=16, type=int)
     parser.add_argument('--num_slots', default=7, type=int, help='Number of slots in Slot Attention.')
     parser.add_argument('--num_iterations', default=3, type=int, help='Number of attention iterations.')
-    parser.add_argument('--hid_dim', default=64, type=int, help='hidden dimension size')
+    parser.add_argument('--hid_dim', default=64, type=int, help='hidden dimension size of slot MLP')
+    parser.add_argument('--decoder_init_size', default=8, type=int, help='(dinosaur+COCO only) init size for adaptive decoders')
+    parser.add_argument('--decoder_hid_dim', default=64, type=int, help='(dinosaur+COCO only) hidden dimension size of decoder MLP')
+    parser.add_argument('--decoder_num_conv_layers', default=6, type=int, help='(dinosaur+COCO only) number of conv layers in decoder')
+    parser.add_argument('--decoder_type', choices=['adaptive', 'fixed', 'coco-adaptive', 'coco-fixed'], help='(dinosaur+COCO only) type of decoder to use')
     parser.add_argument('--learning_rate', default=0.0004, type=float)
     parser.add_argument('--warmup_steps', default=10000, type=int, help='Number of warmup steps for the learning rate.')
     parser.add_argument('--decay_rate', default=0.5, type=float, help='Rate for the learning rate decay.')
@@ -306,7 +396,14 @@ if __name__ == "__main__":
     parser.add_argument('--bce-loss', action='store_true', help='calculate the reconstruction loss using binary cross entropy rather than mean squared error')
     parser.add_argument('--identity-proj', action='store_true', help='set projection to identity function. This option is equivalent to applying var/cov regularization on slot vectors directly')
     parser.add_argument('--dataset-rescale', action='store_true', help='by default image is rescaled from [0,255] to [0,1]. This option enables rescale from [0,255] to [-1,1]. This option the one used in original Slot Attention paper')
+    parser.add_argument('--dinosaur', action='store_true', help='run projection head SA on top of frozen ViT embeddings')
+    parser.add_argument('--embed_path', default="./data/coco/embedding", type=str, help='path to pre-generated COCO 2017 embeddings')
+    parser.add_argument('--coco-mask-dynamic', action='store_true', help='load COCO masks only when they are needed for ARI calculation')
+    parser.add_argument('--grad-clip', default=-1, type=float, help='Level of grad norm clipping to use. <0 to disable.')
     parser.add_argument('--proj-layernorm', action='store_true', help='use layernorm in projection layer (default is batchnorm)')
+    parser.add_argument('--dinosaur-downsample', action='store_true', help='run DINOSAUR experiment with (128, 128) resolution rather than (224, 224)')
+    parser.add_argument('--dinosaur-heavydownsample', action='store_true', help='run DINOSAUR experiment with (64, 64) resolution rather than (224, 224)')
+
 
     main(parser.parse_args())
 

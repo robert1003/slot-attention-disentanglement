@@ -114,7 +114,7 @@ class Encoder(nn.Module):
         return x
 
 class Decoder(nn.Module):
-    def __init__(self, hid_dim, resolution):
+    def __init__(self, hid_dim, resolution, decoder_init_size=(8, 8)):
         super().__init__()
         self.conv1 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(2, 2), padding=2, output_padding=1).to(device)
         self.conv2 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(2, 2), padding=2, output_padding=1).to(device)
@@ -122,7 +122,7 @@ class Decoder(nn.Module):
         self.conv4 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(2, 2), padding=2, output_padding=1).to(device)
         self.conv5 = nn.ConvTranspose2d(hid_dim, hid_dim, 5, stride=(1, 1), padding=2).to(device)
         self.conv6 = nn.ConvTranspose2d(hid_dim, 4, 3, stride=(1, 1), padding=1)
-        self.decoder_initial_size = (8, 8)
+        self.decoder_initial_size = decoder_init_size
         self.decoder_pos = SoftPositionEmbed(hid_dim, self.decoder_initial_size)
         self.resolution = resolution
 
@@ -146,7 +146,7 @@ class Decoder(nn.Module):
         x = self.conv5(x)
         x = F.relu(x)
         x = self.conv6(x)
-        x = x[:,:,:self.resolution[0], :self.resolution[1]]
+        assert x.shape[-1] == self.resolution[1]
         x = x.permute(0,2,3,1)
         return x
     
@@ -180,8 +180,101 @@ class MDSpritesDecoder(nn.Module):
         x = self.conv4(x)
 
         # Split channels
-        x = x[:,:,:self.resolution[0], :self.resolution[1]]
+        assert x.shape[-1] == self.resolution[1]
         x = x.permute(0,2,3,1)
+        return x
+
+"""Adaptive Conv Decoder with projection layer"""
+class COCOAdaptiveDecoder(nn.Module):
+    def __init__(self, hid_dim, decoder_hid_dim, resolution, decoder_init_size=(8, 8), num_conv_layers=6):
+        super().__init__()
+        self.decoder_initial_size = decoder_init_size
+        self.decoder_pos = SoftPositionEmbed(hid_dim, self.decoder_initial_size)
+        self.resolution = resolution
+
+        self.proj = nn.Sequential(
+                nn.Linear(hid_dim, decoder_hid_dim),
+                nn.ReLU(),
+                nn.Linear(decoder_hid_dim, decoder_hid_dim),
+                nn.ReLU(),
+                nn.Linear(decoder_hid_dim, decoder_hid_dim)
+            )
+
+        conv_layers = []
+        for i in range(num_conv_layers):
+            if i < num_conv_layers - 2:
+                conv_layers.append(nn.ConvTranspose2d(decoder_hid_dim, decoder_hid_dim, 5, stride=(2, 2), padding=2, output_padding=1))
+                conv_layers.append(nn.ReLU())
+            elif i == num_conv_layers - 2:
+                conv_layers.append(nn.ConvTranspose2d(decoder_hid_dim, decoder_hid_dim, 5, stride=(1, 1), padding=2))
+                conv_layers.append(nn.ReLU())
+            else:
+                conv_layers.append(nn.ConvTranspose2d(decoder_hid_dim, 4, 3, stride=(1, 1), padding=1))
+        self.conv = nn.Sequential(*conv_layers)
+
+    def forward(self, x):
+        # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
+        x = x.reshape((-1, x.shape[-1])).unsqueeze(1).unsqueeze(2)
+        x = x.repeat((1, self.decoder_initial_size[0], self.decoder_initial_size[1], 1))
+
+        # Add position embedding
+        x = self.decoder_pos(x)
+        # Apply projection to convert hid_dim to decoder_hid_dim
+        x = self.proj(x)
+        # [B, H, W, C] -> [B, C, H, W]
+        x = x.permute(0,3,1,2)
+        # Apply conv layers
+        x = self.conv(x)
+
+        # Split channels
+        assert x.shape[-1] == self.resolution[1]
+        x = x.permute(0,2,3,1)
+
+        return x
+
+"""Fixed Conv Decoder with projection layer"""
+class COCOFixedDecoder(nn.Module):
+    def __init__(self, hid_dim, decoder_hid_dim, resolution, num_conv_layers=5):
+        super().__init__()
+        self.decoder_initial_size = resolution
+        self.decoder_pos = SoftPositionEmbed(hid_dim, self.decoder_initial_size)
+        self.resolution = resolution
+
+        self.proj = nn.Sequential(
+                nn.Linear(hid_dim, decoder_hid_dim),
+                nn.ReLU(),
+                nn.Linear(decoder_hid_dim, decoder_hid_dim),
+                nn.ReLU(),
+                nn.Linear(decoder_hid_dim, decoder_hid_dim)
+            )
+
+        conv_layers = []
+        for i in range(num_conv_layers):
+            if i < num_conv_layers - 1:
+                conv_layers.append(nn.ConvTranspose2d(decoder_hid_dim, decoder_hid_dim, 5, stride=(1, 1), padding=2))
+                conv_layers.append(nn.ReLU())
+            else:
+                conv_layers.append(nn.ConvTranspose2d(decoder_hid_dim, 4, 3, stride=(1, 1), padding=1))
+        self.conv = nn.Sequential(*conv_layers)
+
+    def forward(self, x):
+        # """Broadcast slot features to a 2D grid and collapse slot dimension.""".
+        x = x.reshape((-1, x.shape[-1])).unsqueeze(1).unsqueeze(2)
+        x = x.repeat((1, self.decoder_initial_size[0], self.decoder_initial_size[1], 1))
+
+        # Add position embedding
+        x = self.decoder_pos(x)
+        # Apply projection to convert hid_dim to decoder_hid_dim
+        x = self.proj(x)
+        # [B, H, W, C] -> [B, C, H, W]
+        x = x.permute(0,3,1,2)
+        # Apply conv layers
+        x = self.conv(x)
+
+        # Split channels
+        assert x.shape[-1] == self.resolution[1]
+        x = x.permute(0,2,3,1)
+
         return x
 
 
@@ -217,13 +310,16 @@ class SlotAttentionAutoEncoder(nn.Module):
             iters = self.num_iterations,
             eps = 1e-8, 
             hidden_dim = 128)
-
+        
     def forward(self, image):
         # `image` has shape: [batch_size, num_channels, width, height].
 
         # Convolutional encoder with position embedding.
         x = self.encoder_cnn(image)  # CNN Backbone.
-        #x = nn.LayerNorm(x.shape[1:]).to(device)(x)
+
+        return self._forward_post_backbone(x, image.shape[0])
+
+    def _forward_post_backbone(self, x, batch_size):
         x = self.encoder_layer_norm(x)
         x = self.fc1(x)
         x = F.relu(x)
@@ -234,12 +330,11 @@ class SlotAttentionAutoEncoder(nn.Module):
         slots_rep = self.slot_attention(x)
         # `slots_rep` has shape: [batch_size, num_slots, slot_size].
         
-        # `slots` has shape: [batch_size*num_slots, width_init, height_init, slot_size].
         x = self.decoder_cnn(slots_rep)
         # `x` has shape: [batch_size*num_slots, width, height, num_channels+1].
 
         # Undo combination of slot and batch dimension; split alpha masks.
-        recons, masks = x.reshape(image.shape[0], -1, x.shape[1], x.shape[2], x.shape[3]).split([3,1], dim=-1)
+        recons, masks = x.reshape(batch_size, -1, x.shape[1], x.shape[2], x.shape[3]).split([3,1], dim=-1)
         # `recons` has shape: [batch_size, num_slots, width, height, num_channels].
         # `masks` has shape: [batch_size, num_slots, width, height, 1].
 
@@ -438,6 +533,122 @@ class ProjectionHead(nn.Module):
         assert n == m
         return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
+
+
+
+
+
+class DINOSAURProjection(SlotAttentionProjection):
+    """
+    Modified Slot Attention architecture used for the frozen-ViT DINOSAUR experiment. 
+    DINOSAUR: https://openreview.net/pdf?id=b9tUk-f_aG
+    Experiment is generally outlined at the beginning of Section 4.3 (pg8) and is used to motivate the paper's use
+    of a feature reconstruction objective, rather than the image reconstruction objective used by Slot Attention.
+    Further details and parameters for the experiment are outlined in Appendices E.1 and E.2 (pg. 31 and 33).
+
+    A frozen ViT-B/16 model pretrained with DINO (vit_base_patch16_224_dino) is first used to precompute embeddings 
+    for the entire dataset and store these embeddings to disk. See experiments.py and `generate_coco_embeddings`.
+    These fixed embeddings are then used to train this architecture. Note the use of _forward_post_backbone below
+    which only runs the part of the SlotAttentionAutoEncoder.forward method that comes after the CNN encoder 
+    (specifically the Slot Attention module and the spatial broadcast decoder).
+
+    Note on experiment design: the DINOSAUR paper lists different hyperarameters for Slot Attention experiments
+    on pg31 (+Table 18) and pg33 (Table 19). Given that experiment design on pg31 explicitly mentions the experiment we
+    are running here, we will use the setup mentioned there. Other design seems to be related to other ablations run 
+    using Slot Attention (number of slots, etc.).
+
+    Experiment settings (pg31):
+        - LR 4e-4
+        - 7 slots
+        - image reconstruction at 128x128 resolution --> NOTE: we use 224x224 instead since this is the size the of ViT input
+        - spatial broadcast decoder 
+        - rest is same as main experiments (Table 18, pg32)
+            - 500k steps
+            - batch size 64
+            - 10k warmup steps
+            - 100k exponential decay half-life
+            - gradient norm clipping at 1.0 (TODO only difference from current set up)
+            - 3 slot attention iterations
+            - slot dimension of 256
+            - MLP hidden dimension of 1024 (4 * slot dimension)
+            
+            Data augmentation: (NOTE: we do not implement these to avoid needing the frozen ViT at train time)
+            - Center crop
+            - random horizontal flip
+
+    python3 train.py --dinosaur --model_dir ./checkpoint/coco --batch_size 64 --num_slots 7 --hid_dim 256 --grad-clip 1 
+        --dataset_path ./data/coco --embed_path ./data/coco/embedding --coco-mask-dynamic
+    
+    
+    TODO: may be the case that we need to use a stronger decoder (Transformer vs. MLP decoder from paper?)
+    TODO: uses CLEVR spatial broadcast decoder by default (experiment with correct size to spatially broadcast to? maybe take mdsprites broadcast approach?)
+    """
+
+    def __init__(self, resolution, opt, vis):
+        super().__init__(resolution, opt, vis, mdsprites=True)
+        
+        # ViT-B/16 encoder outputs tokens of dimensionality 768
+        vit_dim = 768
+
+        # No encoder used, embeddings pre-generated
+        self.encoder_cnn = None
+
+        # Run additional layer norm + linear layer after the ViT and before Slot Attention module
+        # This allows normal fc1 and fc2 to keep original architecture
+        self.encoder_ln0 = nn.LayerNorm(vit_dim, elementwise_affine=True, eps=0.001)
+        self.fc0 = nn.Linear(vit_dim, opt.hid_dim)
+
+        self.slot_attention = SlotAttention(
+            num_slots=self.num_slots,
+            dim=opt.hid_dim,
+            iters = self.num_iterations,
+            eps = 1e-8, 
+            hidden_dim = 4 * opt.hid_dim)
+        
+
+        # init dimension of 16 reconstructs 224x224 image, init dimension of 8 reconstructs 128x128 image. Experiment calls for 
+        # 128x128 reconstruction, but ViT input is 224x224 so use this larger dimension
+        DecoderBuilder = None
+        kwargs = {'hid_dim': opt.hid_dim, 'resolution': self.resolution}
+        match opt.decoder_type:
+            case 'adaptive':
+                DecoderBuilder = Decoder
+            case 'fixed':
+                DecoderBuilder = MDSpritesDecoder
+            case 'coco-adaptive':
+                DecoderBuilder = COCOAdaptiveDecoder
+                kwargs['decoder_hid_dim'] = opt.decoder_hid_dim
+                kwargs['num_conv_layers'] = opt.decoder_num_conv_layers
+            case 'coco-fixed':
+                DecoderBuilder = COCOFixedDecoder
+                kwargs['decoder_hid_dim'] = opt.decoder_hid_dim
+                kwargs['num_conv_layers'] = opt.decoder_num_conv_layers
+
+        self.width_init = self.height_init = opt.decoder_init_size
+        if 'adaptive' in opt.decoder_type:
+            kwargs['decoder_init_size'] = (self.height_init, self.width_init)
+
+        self.decoder_cnn = DecoderBuilder(**kwargs)
+
+    def forward(self, embed, vis_step):
+        # Additional MLP to map ViT token dimension to slot dimension
+        # NOTE: this is a deviation from experiment design, but allows us to preserve the slot attention module architecture
+        embed = self.encoder_ln0(embed)
+        embed = self.fc0(embed)
+        embed = torch.nn.functional.relu(embed)
+
+        recon_combined, recons, masks, slots = super()._forward_post_backbone(embed, embed.shape[0])
+        # `recon_combined` has shape: [batch_size, width, height, num_channels].
+        # `recons` has shape: [batch_size, num_slots, width, height, num_channels].
+        # `masks` has shape: [batch_size, num_slots, width, height, 1].
+        # `slots` has shape: [batch_size, num_slots, slot_size].
+
+        if self.training:
+            # Only run projection head when training
+            return recon_combined, recons, masks, slots, self.projection_head(slots, vis_step)
+            # `self.projection_head` returns a dictionary of losses and logged values.
+
+        return recon_combined, recons, masks, slots, None
 
 
 
