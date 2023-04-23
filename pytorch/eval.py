@@ -127,21 +127,23 @@ def main(opt):
         h, w = image.shape[1], image.shape[2]
 
         color_mask = [
-            np.array([[[128, 0, 0]]]).repeat(h, axis=0).repeat(w, axis=1)   / 255., # red
-            np.array([[[0, 128, 0]]]).repeat(h, axis=0).repeat(w, axis=1)   / 255., # green
-            np.array([[[0, 0, 128]]]).repeat(h, axis=0).repeat(w, axis=1)   / 255., # blue
-            np.array([[[128, 128, 0]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # yellow
-            np.array([[[0, 128, 128]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # cyan
-            np.array([[[128, 0, 128]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # magenta
-            np.array([[[128, 64, 0]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # orange
+            np.array([[[200, 100, 100]]]).repeat(h, axis=0).repeat(w, axis=1)   / 255., # red
+            np.array([[[135, 135, 50]]]).repeat(h, axis=0).repeat(w, axis=1)   / 255., # green
+            np.array([[[40, 80, 110]]]).repeat(h, axis=0).repeat(w, axis=1)   / 255., # blue
+            np.array([[[165, 165, 80]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # yellow
+            np.array([[[65, 130, 140]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # cyan
+            np.array([[[100, 75, 60]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # brown
+            np.array([[[190, 125, 65]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # orange
         ]
         assert opt.num_slots <= len(color_mask)
 
         fig, axs = plt.subplots(1, 7, figsize=(20, 10))
+        plt.subplots_adjust(wspace=0.05)
         for i in range(7):
             axs[i].imshow(image[i])
             tot_mask = np.sum([color_mask[j] * max_mask[i][j] for j in range(opt.num_slots)], axis=0)
-            axs[i].imshow(tot_mask, alpha=0.5)
+            axs[i].axis('off')
+            axs[i].imshow(tot_mask, alpha=0.7)
         plt.savefig('visualize_mask.png', bbox_inches='tight')
         plt.clf()
 
