@@ -6,6 +6,10 @@ from tqdm import tqdm
 from metrics import adjusted_rand_index
 from torchinfo import summary
 
+import matplotlib 
+matplotlib.use('Agg')       # non-interactive backend for matplotlib
+import matplotlib.pyplot as plt
+
 def main(opt):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     resolution = (128, 128)
@@ -55,9 +59,11 @@ def main(opt):
     model.eval()
 
     test_dataloader = torch.utils.data.DataLoader(test_set, batch_size=opt.batch_size,
-                            shuffle=True, num_workers=opt.num_workers, pin_memory=True)
+                            shuffle=False, num_workers=opt.num_workers, pin_memory=True)
 
     first = True
+    first_sample = None
+    first_predict = None
     ari = []
     for sample in tqdm(test_dataloader):
         image = sample['image'].to(device)
@@ -68,6 +74,9 @@ def main(opt):
         elif opt.dinosaur_heavydownsample:
             image = torch.nn.functional.interpolate(image, size=(64, 64))
 
+        if first:
+            first_sample = sample
+
         if first and opt.print_model:
             if opt.base:
                 summary(model, input_data=image)
@@ -77,24 +86,29 @@ def main(opt):
             else:
                 summary(model, input_data=(image, True))
 
-            first = False
-
-        if opt.base:
-            recon_combined, recons, masks, slots = model(image)
-        elif opt.dinosaur:
-            embedding = sample['embedding'].to(device)
-            embedding = sample['embedding'].to(device)
-            recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, True)
-        else:
-            recon_combined, recons, masks, slots, proj_loss_dict = model(image, False)
+        with torch.no_grad():
+            if opt.base:
+                recon_combined, recons, masks, slots = model(image)
+            elif opt.dinosaur:
+                embedding = sample['embedding'].to(device)
+                embedding = sample['embedding'].to(device)
+                recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, True)
+            else:
+                recon_combined, recons, masks, slots, proj_loss_dict = model(image, False)
 
         if opt.dataset_rescale:
             recon_combined = (recon_combined + 1.) / 2.
             recons = (recons + 1.) / 2.
 
+        if first:
+            first_predict = (recon_combined, recons, masks, slots)
+
         flattened_masks = torch.flatten(masks, start_dim=2, end_dim=4)
         flattened_masks = torch.permute(flattened_masks, (0, 2, 1))
         ari.append(adjusted_rand_index(sample['mask'].to(device), flattened_masks.to(device)))
+
+        first = False
+        break
 
     ari = torch.concatenate(ari)
     print('NaN:', torch.isnan(ari).sum().item(), '/', ari.shape[0])
@@ -102,7 +116,36 @@ def main(opt):
 
     print('ARI on {} samples: {}'.format(len(test_set), ari.mean().item()))
 
+    if opt.visualize:
+        image = first_sample['image'].permute(0, 2, 3, 1).cpu().numpy()
+        gt_mask = first_sample['mask'].cpu().numpy()
+        pred_mask = first_predict[2].cpu()
+        _, ids = torch.max(pred_mask, dim=1, keepdim=True)
+        max_mask = torch.zeros_like(pred_mask)
+        max_mask.scatter_(1, ids, 1)
+        max_mask = max_mask.cpu().numpy()
+        h, w = image.shape[1], image.shape[2]
+
+        color_mask = [
+            np.array([[[128, 0, 0]]]).repeat(h, axis=0).repeat(w, axis=1)   / 255., # red
+            np.array([[[0, 128, 0]]]).repeat(h, axis=0).repeat(w, axis=1)   / 255., # green
+            np.array([[[0, 0, 128]]]).repeat(h, axis=0).repeat(w, axis=1)   / 255., # blue
+            np.array([[[128, 128, 0]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # yellow
+            np.array([[[0, 128, 128]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # cyan
+            np.array([[[128, 0, 128]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # magenta
+            np.array([[[128, 64, 0]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # orange
+        ]
+        assert opt.num_slots <= len(color_mask)
+
+        fig, axs = plt.subplots(1, 7, figsize=(20, 10))
+        for i in range(7):
+            axs[i].imshow(image[i])
+            tot_mask = np.sum([color_mask[j] * max_mask[i][j] for j in range(opt.num_slots)], axis=0)
+            axs[i].imshow(tot_mask, alpha=0.5)
+        plt.savefig('test.png', bbox_inches='tight')
+
 if __name__ == '__main__':
+    # parameters from train.py
     parser = argparse.ArgumentParser()
     parser.add_argument('--print_model', action='store_true', help='print model structure')
     parser.add_argument('--model_dir', default='./tmp/model10.ckpt', type=str, help='where to save models' )
@@ -146,5 +189,8 @@ if __name__ == '__main__':
     parser.add_argument('--proj-layernorm', action='store_true', help='use layernorm in projection layer (default is batchnorm)')
     parser.add_argument('--dinosaur-downsample', action='store_true', help='run DINOSAUR experiment with (128, 128) resolution rather than (224, 224)')
     parser.add_argument('--dinosaur-heavydownsample', action='store_true', help='run DINOSAUR experiment with (64, 64) resolution rather than (224, 224)')
+
+    # custom parameters for eval.py
+    parser.add_argument('--visualize', action='store_true', help='visualize the slot recon mask')
 
     main(parser.parse_args())
