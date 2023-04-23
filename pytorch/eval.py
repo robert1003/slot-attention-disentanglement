@@ -5,6 +5,7 @@ from model import *
 from tqdm import tqdm
 from metrics import adjusted_rand_index
 from torchinfo import summary
+import torchvision
 
 import matplotlib 
 matplotlib.use('Agg')       # non-interactive backend for matplotlib
@@ -108,7 +109,6 @@ def main(opt):
         ari.append(adjusted_rand_index(sample['mask'].to(device), flattened_masks.to(device)))
 
         first = False
-        break
 
     ari = torch.concatenate(ari)
     print('NaN:', torch.isnan(ari).sum().item(), '/', ari.shape[0])
@@ -116,7 +116,7 @@ def main(opt):
 
     print('ARI on {} samples: {}'.format(len(test_set), ari.mean().item()))
 
-    if opt.visualize:
+    if opt.visualize_mask:
         image = first_sample['image'].permute(0, 2, 3, 1).cpu().numpy()
         gt_mask = first_sample['mask'].cpu().numpy()
         pred_mask = first_predict[2].cpu()
@@ -142,7 +142,30 @@ def main(opt):
             axs[i].imshow(image[i])
             tot_mask = np.sum([color_mask[j] * max_mask[i][j] for j in range(opt.num_slots)], axis=0)
             axs[i].imshow(tot_mask, alpha=0.5)
-        plt.savefig('test.png', bbox_inches='tight')
+        plt.savefig('visualize_mask.png', bbox_inches='tight')
+        plt.clf()
+
+    if opt.visualize_recon:
+        image = first_sample['image']
+        recon_combined = first_predict[0]
+        recons = first_predict[1]
+        masks = first_predict[2]
+
+        images_to_show = []
+        for i, img in enumerate(image[:16]):
+            img = img.cpu()
+            rec = recons[i].permute(0,3,1,2).cpu().detach()
+            msk = masks[i].permute(0,3,1,2).cpu().detach()
+
+            images_to_show.append(img)
+            images_to_show.append(recon_combined[i].cpu().detach())
+            
+            for j in range(opt.num_slots):
+                images_to_show.append(rec[j] * msk[j] + (1 - msk[j]))
+
+        images_to_show = torchvision.utils.make_grid(images_to_show, nrow=opt.num_slots+2).clamp_(0,1)
+        torchvision.utils.save_image(images_to_show, 'visualize_recon.png')
+    
 
 if __name__ == '__main__':
     # parameters from train.py
@@ -191,6 +214,7 @@ if __name__ == '__main__':
     parser.add_argument('--dinosaur-heavydownsample', action='store_true', help='run DINOSAUR experiment with (64, 64) resolution rather than (224, 224)')
 
     # custom parameters for eval.py
-    parser.add_argument('--visualize', action='store_true', help='visualize the slot recon mask')
+    parser.add_argument('--visualize-mask', action='store_true', help='visualize the slot recon mask')
+    parser.add_argument('--visualize-recon', action='store_true', help='visualize the slot recon image')
 
     main(parser.parse_args())
