@@ -65,6 +65,7 @@ def main(opt):
     first = True
     first_sample = None
     first_predict = None
+    cov_mean = 0
     ari = []
     for sample in tqdm(test_dataloader):
         image = sample['image'].to(device)
@@ -97,6 +98,9 @@ def main(opt):
             else:
                 recon_combined, recons, masks, slots, proj_loss_dict = model(image, False)
 
+        feature_cov = torch.cov(slots.detach().reshape((-1,) + slots.shape[2:]).T).cpu()
+        cov_mean += feature_cov.abs().mean()
+
         if opt.dataset_rescale:
             recon_combined = (recon_combined + 1.) / 2.
             recons = (recons + 1.) / 2.
@@ -115,16 +119,20 @@ def main(opt):
     ari = ari[~torch.isnan(ari)]
 
     print('ARI on {} samples: {}'.format(len(test_set), ari.mean().item()))
+    print('slot feature mean', cov_mean / len(test_dataloader))
 
     if opt.visualize_mask:
         image = first_sample['image'].permute(0, 2, 3, 1).cpu().numpy()
-        gt_mask = first_sample['mask'].cpu().numpy()
+        h, w = image.shape[1], image.shape[2]
+        batch_size, hw, max_obj = first_sample['mask'].shape
+        assert h*w == hw
+        gt_mask = first_sample['mask'].reshape(batch_size, h, w, max_obj).bool().int() \
+                .permute(0, 3, 1, 2).unsqueeze(4).repeat(1, 1, 1, 1, 3).cpu().numpy()
         pred_mask = first_predict[2].cpu()
         _, ids = torch.max(pred_mask, dim=1, keepdim=True)
         max_mask = torch.zeros_like(pred_mask)
         max_mask.scatter_(1, ids, 1)
         max_mask = max_mask.cpu().numpy()
-        h, w = image.shape[1], image.shape[2]
 
         color_mask = [
             np.array([[[200, 100, 100]]]).repeat(h, axis=0).repeat(w, axis=1)   / 255., # red
@@ -136,6 +144,23 @@ def main(opt):
             np.array([[[190, 125, 65]]]).repeat(h, axis=0).repeat(w, axis=1) / 255., # orange
         ]
         assert opt.num_slots <= len(color_mask)
+
+        fig, axs = plt.subplots(1, 7, figsize=(20, 10))
+        plt.subplots_adjust(wspace=0.05)
+        for i in range(7):
+            axs[i].imshow(image[i])
+            tot_mask = 0.0
+            color_idx = 0
+            for j in range(max_obj):
+                if gt_mask[i][j].sum() > 0:
+                    tot_mask += color_mask[color_idx] * gt_mask[i][j]
+                    color_idx += 1
+                    if color_idx >= 7:
+                        break
+            axs[i].axis('off')
+            axs[i].imshow(tot_mask, alpha=0.5)
+        plt.savefig('visualize_gt_mask.png', bbox_inches='tight')
+        plt.clf()
 
         fig, axs = plt.subplots(1, 7, figsize=(20, 10))
         plt.subplots_adjust(wspace=0.05)
