@@ -693,6 +693,8 @@ class DINOSAUREmbProjection(nn.Module):
     vis: binary switch for visualization
     """
     def __init__(self, seq_len, opt, vis):
+        super().__init__()
+        
         self.hid_dim = opt.hid_dim
         self.num_slots = opt.num_slots
         self.num_iterations = opt.num_iterations
@@ -706,12 +708,16 @@ class DINOSAUREmbProjection(nn.Module):
         self.encoder_ln0 = nn.LayerNorm(self.vit_dim, elementwise_affine=True, eps=0.001)
         self.fc0 = nn.Linear(self.vit_dim, opt.hid_dim)
 
+        self.encoder_layer_norm = nn.LayerNorm(opt.hid_dim, elementwise_affine=True, eps=0.001)
         self.slot_attention = SlotAttention(
             num_slots=self.num_slots,
             dim=opt.hid_dim,
             iters = self.num_iterations,
             eps = 1e-8, 
             hidden_dim = 4 * opt.hid_dim)
+
+        self.fc1 = nn.Linear(opt.hid_dim, opt.hid_dim)
+        self.fc2 = nn.Linear(opt.hid_dim, opt.hid_dim)
         
         # MLP Decoder
         self.decoder_mlp = COCOEmbDecoder(opt.hid_dim, opt.decoder_hid_dim, self.vit_dim, seq_len, opt.decoder_mlp_num_layers)
