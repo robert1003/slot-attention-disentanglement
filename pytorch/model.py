@@ -277,6 +277,38 @@ class COCOFixedDecoder(nn.Module):
 
         return x
 
+"""Fixed MLP Decoder"""
+class COCOEmbDecoder(nn.Module):
+    def __init__(self, in_dim, decoder_hid_dim, out_dim, init_num_patches, num_layers=4):
+        super().__init__()
+        self.init_num_patches = init_num_patches
+        self.decoder_pos = nn.Embedding(init_num_patches, in_dim)
+
+        mlp_layers = [nn.Linear(in_dim, decoder_hid_dim)]
+        for _ in range(num_layers-2):
+            mlp_layers.append(nn.ReLU())
+            mlp_layers.append(nn.Linear(decoder_hid_dim, decoder_hid_dim))
+        mlp_layers.append(nn.ReLU())
+        mlp_layers.append(nn.Linear(decoder_hid_dim, out_dim+1)) # +1 for the alpha value
+
+        self.mlp = nn.Sequential(*mlp_layers)
+
+    def forward(self, x):
+        """
+        `x` has shape [batch_size, num_slots, hid_dim].
+        """
+        # Broadcast slot features to 1D sequence
+        x = x.reshape((-1, x.shape[-1])).unsqueeze(1).repeat((1, self.init_num_patches, 1))
+        # `x` has shape [batch_size*num_slots init_num_patches, hid_dim]
+
+        # Add position embedding
+        x = x + self.decoder_pos.weight
+        # Apply mlp decoder
+        x = self.mlp(x)
+        # `x` has shape [batch_size, num_slots, init_num_patches, hid_dim+1]
+
+        return x
+
 
 """Slot Attention-based auto-encoder for object discovery."""
 class SlotAttentionAutoEncoder(nn.Module):
@@ -652,4 +684,84 @@ class DINOSAURProjection(SlotAttentionProjection):
 
 
 
+class DINOSAUREmbProjection(nn.Module):
+    """
+    Refer to class DINOSAURProjection for detailed comments
+
+    seq_len: number of patches in image
+    opt: ArgumentParser object
+    vis: binary switch for visualization
+    """
+    def __init__(self, seq_len, opt, vis):
+        self.hid_dim = opt.hid_dim
+        self.num_slots = opt.num_slots
+        self.num_iterations = opt.num_iterations
+        self.vit_dim = 768
+
+        # No encoder used, embeddings pre-generated
+        self.encoder_cnn = None
+
+        # Run additional layer norm + linear layer after the ViT and before Slot Attention module
+        # This allows normal fc1 and fc2 to keep original architecture
+        self.encoder_ln0 = nn.LayerNorm(self.vit_dim, elementwise_affine=True, eps=0.001)
+        self.fc0 = nn.Linear(self.vit_dim, opt.hid_dim)
+
+        self.slot_attention = SlotAttention(
+            num_slots=self.num_slots,
+            dim=opt.hid_dim,
+            iters = self.num_iterations,
+            eps = 1e-8, 
+            hidden_dim = 4 * opt.hid_dim)
+        
+        # MLP Decoder
+        self.decoder_mlp = COCOEmbDecoder(opt.hid_dim, opt.decoder_hid_dim, self.vit_dim, seq_len, opt.decoder_mlp_num_layers)
+
+        # Projection Head
+        self.projection_head = ProjectionHead(opt, vis=vis)
+
+    def _forward_post_backbone(self, x, batch_size):
+        x = self.encoder_layer_norm(x)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)  # Feedforward network on set.
+        # `x` has shape: [batch_size, seq_len, input_size].
+
+        # Slot Attention module.
+        slots_rep = self.slot_attention(x)
+        # `slots_rep` has shape: [batch_size, num_slots, slot_size].
+
+        # MLP Decoder
+        x = self.decoder_mlp(slots_rep)
+        # `x` has shape: [batch_size*num_slots, seq_len, vit_dim+1].
+
+        # Undo combination of slot and batch dimension; split alpha masks.
+        recons, masks = x.reshape(batch_size, -1, x.shape[1], x.shape[2]).split([self.vit_dim,1], dim=-1)
+        # `recons` has shape: [batch_size, num_slots, seq_len, vit_dim].
+        # `masks` has shape: [batch_size, num_slots, seq_len, 1].
+
+        # Normalize alpha masks over slots.
+        masks = nn.Softmax(dim=1)(masks)
+        recon_combined = (recons * masks).sum(dim=1) # recombine latent vector
+        # `recon_combined` has shape: [batch_size, seq_len, vit_dim].
+
+        return recon_combined, recons, masks, slots_rep
+
+
+    def forward(self, embed, vis_step):
+        embed = self.encoder_ln0(embed)
+        embed = self.fc0(embed)
+        embed = torch.nn.functional.relu(embed)
+
+        recon_combined, recons, masks, slots = self._forward_post_backbone(embed, embed.shape[0])
+        # `recon_combined` has shape: [batch_size, seq_len, vit_dim].
+        # `recons` has shape: [batch_size, num_slots, seq_len, vit_dim].
+        # `masks` has shape: [batch_size, num_slots, seq_len, 1].
+        # `slots` has shape: [batch_size, num_slots, slot_size].
+
+        if self.training:
+            # Only run projection head when training
+            return recon_combined, recons, masks, slots, self.projection_head(slots, vis_step)
+            # `self.projection_head` returns a dictionary of losses and logged values.
+
+        return recon_combined, recons, masks, slots, None
 

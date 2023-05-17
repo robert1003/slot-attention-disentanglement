@@ -14,19 +14,20 @@ import matplotlib.pyplot as plt
 from PIL import Image as Image, ImageEnhance
 
 from metrics import adjusted_rand_index
-import torchvision
 
 import wandb
 import matplotlib 
 matplotlib.use('Agg')       # non-interactive backend for matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
+import math
 
 def main(opt):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     resolution = (128, 128)
 
-    if opt.dinosaur:
+    if opt.dinosaur or opt.dinosaur_slot:
         # Resolution is hard-coded by the frozen ViT input dimensions
         resolution = (224, 224)
         downsample_dim = 0
@@ -61,6 +62,8 @@ def main(opt):
     elif opt.dinosaur:
         # Hidden dimension must be dimension of ViT encoding for each token
         model = DINOSAURProjection(resolution, opt, vis=opt.vis_freq > 0).to(device)
+    elif opt.dinosaur_emb:
+        model = DINOSAUREmbProjection(resolution, opt, vis=opt.vis_freq > 0).to(device)
     else:
         model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0, mdsprites=mdsprites).to(device)
 
@@ -79,7 +82,7 @@ def main(opt):
         from torchinfo import summary
         sample = next(iter(train_dataloader))
         image = sample['image']
-        if not opt.dinosaur:
+        if not (opt.dinosaur and opt.dinosaur_emb):
             image = image.to(device)
         if opt.dinosaur_downsample:
             image = torch.nn.functional.interpolate(image, size=(128, 128))
@@ -89,7 +92,7 @@ def main(opt):
         with torch.no_grad():
             if opt.base:
                 summary(model, input_data=image)
-            elif opt.dinosaur:
+            elif opt.dinosaur or opt.dinosaur_emb:
                 embedding = sample['embedding'].to(device)
                 summary(model, input_data=(embedding, True))
             else:
@@ -134,7 +137,7 @@ def main(opt):
             learning_rate = learning_rate * (opt.decay_rate ** (i / opt.decay_steps))
             optimizer.param_groups[0]['lr'] = learning_rate
             image = sample['image']
-            if not opt.dinosaur:
+            if not (opt.dinosaur and opt.dinosaur_emb):
                 image = image.to(device)
             if opt.dinosaur_downsample:
                 image = torch.nn.functional.interpolate(image, size=(128, 128))
@@ -156,7 +159,7 @@ def main(opt):
                 recon_combined, recons, masks, slots = model(image)
                 loss = criterion(recon_combined, image)
             elif opt.info_nce:
-                if opt.dinosaur:
+                if opt.dinosaur or opt.dinosaur_emb:
                     embedding = sample['embedding'].to(device)
                     recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, vis_step)
                 else:
@@ -165,6 +168,8 @@ def main(opt):
                     # Move reconstruction onto CPU for loss calculation, then back to GPU for backprop.
                     # Avoids every putting image on GPU, allowing for larger batch sizes
                     recon_loss = criterion(recon_combined.cpu(), image).to(device)
+                elif opt.dinosaur_emb:
+                    raise NotImplementedError
                 else:
                     recon_loss = criterion(recon_combined, image)
 
@@ -178,6 +183,8 @@ def main(opt):
                 if opt.dinosaur:
                     embedding = sample['embedding'].to(device)
                     recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, vis_step)
+                elif opt.dinosaur_emb:
+                    recon_loss = criterion(recon_combined.cpu(), embedding).to(device)
                 else:
                     recon_combined, recons, masks, slots, proj_loss_dict = model(image, vis_step)
                 proj_loss = opt.var_weight * proj_loss_dict["std_loss"] + cov_weight * proj_loss_dict["cov_loss"]
@@ -297,20 +304,46 @@ def visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots
         plt.close()
 
     # Visualize image, reconstruction, and slots for subset of images
-    images_to_show = []
-    for i, img in enumerate(image[:16]):
-        img = img.cpu()
-        rec = recons[i].permute(0,3,1,2).cpu().detach()
-        msk = masks[i].permute(0,3,1,2).cpu().detach()
+    if not opt.dinosaur_emb:
+        images_to_show = []
+        for i, img in enumerate(image[:16]):
+            img = img.cpu()
+            rec = recons[i].permute(0,3,1,2).cpu().detach()
+            msk = masks[i].permute(0,3,1,2).cpu().detach()
 
-        images_to_show.append(img)
-        images_to_show.append(recon_combined[i].cpu().detach())
-        
-        for j in range(opt.num_slots):
-            images_to_show.append(rec[j] * msk[j] + (1 - msk[j]))
+            images_to_show.append(img)
+            images_to_show.append(recon_combined[i].cpu().detach())
+            
+            for j in range(opt.num_slots):
+                images_to_show.append(rec[j] * msk[j] + (1 - msk[j]))
 
-    images_to_show = torchvision.utils.make_grid(images_to_show, nrow=opt.num_slots+2).clamp_(0,1)
-    vis_dict['slot_output'] = wandb.Image(images_to_show)
+        images_to_show = torchvision.utils.make_grid(images_to_show, nrow=opt.num_slots+2).clamp_(0,1)
+        vis_dict['slot_output'] = wandb.Image(images_to_show)
+    else:
+        fig, axs = plt.subplots(16, opt.num_slots+2, figsize=(20, 10*16))
+        plt.subplots_adjust(wspace=0.02)
+        for i, img in enumerate(image[:16]):
+            img = img.cpu()
+            len = math.sqrt(masks[i].shape[0])
+            msk = masks[i].reshape((len, len, 1))
+            # `msk` has shape [len, len, 1]
+            _, ids = torch.max(msk, dim=1, keepdim=True)
+            max_mask = torch.zeros_like(msk)
+            max_mask.scatter_(1, ids, 1)
+            max_mask = max_mask.cpu().numpy()
+
+            axs[i][0].imshow(img)
+            colors = cm.rainbow(np.linspace(0, 1, opt.num_slots))
+            tot_mask = 0.0
+            for j, c in zip(range(opt.num_slots), colors):
+                c = c[:3] # get rid of alpha
+                axs[i][j+2].imshow(img)
+                axs[i][j+2].imshow(msk[j] * c, alpha=0.5)
+                tot_mask += max_mask[j] * c
+            axs[i][1].imshow(img)
+            axs[i][1].imshow(tot_mask, alpha=0.5)
+
+        vis_dict['slot_output'] = wandb.Image(fig)
 
     # Visualize slot feature covariance
     feature_cov = torch.cov(slots.detach().reshape((-1,) + slots.shape[2:]).T).cpu()
@@ -403,6 +436,9 @@ if __name__ == "__main__":
     parser.add_argument('--proj-layernorm', action='store_true', help='use layernorm in projection layer (default is batchnorm)')
     parser.add_argument('--dinosaur-downsample', action='store_true', help='run DINOSAUR experiment with (128, 128) resolution rather than (224, 224)')
     parser.add_argument('--dinosaur-heavydownsample', action='store_true', help='run DINOSAUR experiment with (64, 64) resolution rather than (224, 224)')
+
+    # For dinosaur_emb experiment
+    parser.add_argument('--dinosaur-emb', action='store_true')
 
 
     main(parser.parse_args())
