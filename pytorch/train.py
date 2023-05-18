@@ -331,10 +331,10 @@ def visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots
         for i, img in enumerate(image[:16]):
             img = img.cpu().permute(1, 2, 0).numpy()
             msk = masks[i]
-            _, ids = torch.max(msk, dim=1, keepdim=True)
-            max_mask = torch.zeros_like(msk)
-            max_mask.scatter_(1, ids, 1)
-            max_mask = max_mask.cpu().numpy()
+            # _, ids = torch.max(msk, dim=1, keepdim=True)
+            # max_mask = torch.zeros_like(msk)
+            # max_mask.scatter_(1, ids, 1)
+            # max_mask = max_mask.cpu().numpy()
 
             for j in range(opt.num_slots+2):
                 axs[i][j].axis('off')
@@ -346,7 +346,7 @@ def visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots
                 c = c[:3] # get rid of alpha
                 axs[i][j+2].imshow(img)
                 axs[i][j+2].imshow(msk[j] * c, alpha=0.5)
-                tot_mask += max_mask[j] * c
+                tot_mask += msk[j] * c
             axs[i][1].imshow(img)
             axs[i][1].imshow(tot_mask, alpha=0.5)
 
