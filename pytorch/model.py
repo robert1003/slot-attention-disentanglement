@@ -282,7 +282,8 @@ class COCOEmbDecoder(nn.Module):
     def __init__(self, in_dim, decoder_hid_dim, out_dim, init_num_patches, num_layers=4):
         super().__init__()
         self.init_num_patches = init_num_patches
-        self.decoder_pos = nn.Embedding(init_num_patches, in_dim)
+        self.decoder_pos_w = nn.Parameter(torch.zeros((init_num_patches, in_dim)))
+        torch.nn.init.xavier_uniform_(self.decoder_pos_w)
 
         mlp_layers = [nn.Linear(in_dim, decoder_hid_dim)]
         for _ in range(num_layers-2):
@@ -302,7 +303,7 @@ class COCOEmbDecoder(nn.Module):
         # `x` has shape [batch_size*num_slots init_num_patches, hid_dim]
 
         # Add position embedding
-        x = x + self.decoder_pos.weight
+        x = x + self.decoder_pos_w
         # Apply mlp decoder
         x = self.mlp(x)
         # `x` has shape [batch_size, num_slots, init_num_patches, hid_dim+1]
