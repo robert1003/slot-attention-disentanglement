@@ -330,7 +330,7 @@ def visualize(vis_dict, opt, sample, image, recon_combined, recons, masks, slots
         plt.subplots_adjust(wspace=0.02, hspace=0.02)
         for i, img in enumerate(image[:16]):
             img = img.cpu().permute(1, 2, 0).numpy()
-            msk = masks[i]
+            msk = masks[i].numpy()
             # _, ids = torch.max(msk, dim=1, keepdim=True)
             # max_mask = torch.zeros_like(msk)
             # max_mask.scatter_(1, ids, 1)
