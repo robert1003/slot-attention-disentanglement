@@ -15,7 +15,7 @@ def main(opt):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     resolution = (128, 128)
 
-    if opt.dinosaur:
+    if opt.dinosaur or opt.dinosaur_emb:
         # Resolution is hard-coded by the frozen ViT input dimensions
         resolution = (224, 224)
         downsample_dim = 0
@@ -52,6 +52,8 @@ def main(opt):
     elif opt.dinosaur:
         # Hidden dimension must be dimension of ViT encoding for each token
         model = DINOSAURProjection(resolution, opt, vis=opt.vis_freq > 0).to(device)
+    elif opt.dinosaur_emb:
+        model = DINOSAUREmbProjection(196, opt, vis=opt.vis_freq > 0).to(device)
     else:
         model = SlotAttentionProjection(resolution, opt, vis=opt.vis_freq > 0, mdsprites=mdsprites).to(device)
 
@@ -69,7 +71,7 @@ def main(opt):
     ari = []
     for sample in tqdm(test_dataloader):
         image = sample['image'].to(device)
-        if not opt.dinosaur:
+        if not (opt.dinosaur and opt.dinosaur_emb):
             image = image.to(device)
         if opt.dinosaur_downsample:
             image = torch.nn.functional.interpolate(image, size=(128, 128))
@@ -82,7 +84,7 @@ def main(opt):
         if first and opt.print_model:
             if opt.base:
                 summary(model, input_data=image)
-            elif opt.dinosaur:
+            elif opt.dinosaur or opt.dinosaur_emb:
                 embedding = sample['embedding'].to(device)
                 summary(model, input_data=(embedding, True))
             else:
@@ -91,12 +93,19 @@ def main(opt):
         with torch.no_grad():
             if opt.base:
                 recon_combined, recons, masks, slots = model(image)
-            elif opt.dinosaur:
-                embedding = sample['embedding'].to(device)
+            elif opt.dinosaur or opt.dinosaur_emb:
                 embedding = sample['embedding'].to(device)
                 recon_combined, recons, masks, slots, proj_loss_dict = model(embedding, True)
             else:
                 recon_combined, recons, masks, slots, proj_loss_dict = model(image, False)
+
+        if opt.dinosaur_emb:
+            batch_size = image.shape[0]
+            length = 14 # XXX: this is related to seq_len of underlying ViT. Should be a parameter
+            masks = masks.reshape((batch_size, opt.num_slots, length, length, 1)).cpu().detach()
+            img_width = image.shape[2]
+            img_height = image.shape[3]
+            masks = F.interpolate(masks.permute(0,1,4,2,3).reshape((-1,1,length,length)), size=(img_width, img_height), mode='nearest').reshape((batch_size, opt.num_slots, 1, img_width, img_height)).permute(0,1,3,4,2)
 
         feature_cov = torch.cov(slots.detach().reshape((-1,) + slots.shape[2:]).T).cpu()
         cov_mean += feature_cov.abs().mean()
@@ -239,6 +248,10 @@ if __name__ == '__main__':
     parser.add_argument('--proj-layernorm', action='store_true', help='use layernorm in projection layer (default is batchnorm)')
     parser.add_argument('--dinosaur-downsample', action='store_true', help='run DINOSAUR experiment with (128, 128) resolution rather than (224, 224)')
     parser.add_argument('--dinosaur-heavydownsample', action='store_true', help='run DINOSAUR experiment with (64, 64) resolution rather than (224, 224)')
+
+    # For dinosaur_emb experiment
+    parser.add_argument('--dinosaur-emb', action='store_true')
+    parser.add_argument('--decoder_mlp_num_layers', default=4, type=int, help='(dinosaur_emb only) number of layers in decoder MLP')
 
     # custom parameters for eval.py
     parser.add_argument('--visualize-mask', action='store_true', help='visualize the slot recon mask')
