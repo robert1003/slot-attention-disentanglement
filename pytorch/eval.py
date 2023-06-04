@@ -7,9 +7,12 @@ from metrics import adjusted_rand_index
 from torchinfo import summary
 import torchvision
 
+import torch.nn.functional as F
+
 import matplotlib 
 matplotlib.use('Agg')       # non-interactive backend for matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 def main(opt):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -171,15 +174,42 @@ def main(opt):
         plt.savefig('visualize_gt_mask.png', bbox_inches='tight')
         plt.clf()
 
-        fig, axs = plt.subplots(1, 7, figsize=(20, 10))
-        plt.subplots_adjust(wspace=0.05)
-        for i in range(7):
-            axs[i].imshow(image[i])
-            tot_mask = np.sum([color_mask[j] * max_mask[i][j] for j in range(opt.num_slots)], axis=0)
-            axs[i].axis('off')
-            axs[i].imshow(tot_mask, alpha=0.7)
-        plt.savefig('visualize_mask.png', bbox_inches='tight')
-        plt.clf()
+        if not opt.dinosaur_emb:
+            for k in range(0, 28, 7):
+                fig, axs = plt.subplots(1, 7, figsize=(20, 10))
+                plt.subplots_adjust(wspace=0.05)
+                for i in range(k, k+7):
+                    axs[i].imshow(image[i])
+                    tot_mask = np.sum([color_mask[j] * max_mask[i][j] for j in range(opt.num_slots)], axis=0)
+                    axs[i].axis('off')
+                    axs[i].imshow(tot_mask, alpha=0.7)
+                plt.savefig(f'visualize_mask_{k}.png', bbox_inches='tight')
+                plt.clf()
+        else:
+            batch_size = image.shape[0]
+            length = 14 # XXX: this is related to seq_len of underlying ViT. Should be a parameter
+            images = first_sample['image']
+            masks = first_predict[2]
+
+            for k in range(0, 28, 7):
+                fig, axs = plt.subplots(1, 7, figsize=(20, 10))
+                plt.subplots_adjust(wspace=0.05)
+
+                for i, img in enumerate(images[k:k+7]):
+                    img = img.cpu().permute(1, 2, 0).numpy()
+                    msk = masks[i].numpy()
+
+                    colors = cm.rainbow(np.linspace(0, 1, opt.num_slots))
+                    tot_mask = 0.0
+                    for j, c in zip(range(opt.num_slots), colors):
+                        c = c[:3] # get rid of alpha
+                        tot_mask += msk[j] * c
+                    axs[i].axis('off')
+                    axs[i].imshow(img)
+                    axs[i].imshow(tot_mask, alpha=0.5)
+
+                plt.savefig(f'visualize_mask_{k}.png', bbox_inches='tight')
+                plt.clf()
 
     if opt.visualize_recon:
         image = first_sample['image']
