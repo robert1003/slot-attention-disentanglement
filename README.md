@@ -1,4 +1,4 @@
-# Improving Slot Attention Through Disentanglement
+# Exploring the Role of the Bottleneck in Slot-Based Models Through Covariance Regularization
 
 This repo contains code adapted from [here](https://github.com/evelinehong/slot-attention-pytorch) for the following work:
 
