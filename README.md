@@ -6,9 +6,11 @@ This repo contains code adapted from [here](https://github.com/evelinehong/slot-
 
 [Andrew Stange](https://www.linkedin.com/in/andrewstange1/), [Robert Lo](https://robertlo.tech), [Abishek Sridhar](https://www.linkedin.com/in/abishek-sridhar5/), [Kousik Rajesh](https://www.linkedin.com/in/kousik-rajesh/)
 
-## Main Conclusion
+## Abstract
 
-Our proposed loss does not improve the performance of slot-attention, but it can be used to ensure stable training and prevent collapse.
+In this project we attempt to make slot-based models with an image reconstruction objective competitive with those that use a feature reconstruction objectives on real world datasets. We propose a loss-based approach to constricting the bottleneck of slot-based models, allowing larger-capacity encoder networks to be used with Slot Attention without producing degenerate stripe-shaped masks. 
+    
+We find that our proposed method offers an improvement over the baseline Slot Attention model but does not reach the performance of \dinosaur on the COCO2017 dataset. Throughout this project, we confirm the superiority of a feature reconstruction objective over an image reconstruction objective and explore the role of the architectural bottleneck in slot-based models.
 
 ## File Structure
 
