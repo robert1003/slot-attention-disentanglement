@@ -73,6 +73,6 @@ Format: [git hash], [command]
 * DINOSAUR with large dim + CovLoss: `db5b29a`, `python3 train.py --model_dir [checkpoint path] --batch_size 64 --num_slots 7 --hid_dim 1024 --dinosaur-emb --decoder_hid_dim 3072 --grad-clip 1 --dataset_path [coco path] --embed_path [coco embedding path] --dinosaur-downsample --num_workers 16 --std_target 1.0 --proj_weight 1.0 --var_weight 1.0 --cov_weight 1.0 --identity-proj --proj_dim 1024 --print_model`
 ```
 
-## Evaluation
+## Evaluation (ARI calculation and mask visualization)
 
 Use the same git hash and command above, only need to replace `train.py` to `eval.py`. Note that ARI calculation is not deterministic, so the numbers might not match exactly.
