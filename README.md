@@ -10,7 +10,7 @@ This repo contains code adapted from [here](https://github.com/evelinehong/slot-
 
 In this project we attempt to make slot-based models with an image reconstruction objective competitive with those that use a feature reconstruction objectives on real world datasets. We propose a loss-based approach to constricting the bottleneck of slot-based models, allowing larger-capacity encoder networks to be used with Slot Attention without producing degenerate stripe-shaped masks. 
     
-We find that our proposed method offers an improvement over the baseline Slot Attention model but does not reach the performance of \dinosaur on the COCO2017 dataset. Throughout this project, we confirm the superiority of a feature reconstruction objective over an image reconstruction objective and explore the role of the architectural bottleneck in slot-based models.
+We find that our proposed method offers an improvement over the baseline Slot Attention model but does not reach the performance of DINOSAUR on the COCO2017 dataset. Throughout this project, we confirm the superiority of a feature reconstruction objective over an image reconstruction objective and explore the role of the architectural bottleneck in slot-based models.
 
 ## File Structure
 
