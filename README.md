@@ -2,7 +2,7 @@
 
 This repo contains code adapted from [here](https://github.com/evelinehong/slot-attention-pytorch) for the following work:
 
-"Improving Slot Attention Through Disentanglement"
+"Exploring the Role of the Bottleneck in Slot-Based Models Through Covariance Regularization"
 
 [Andrew Stange](https://www.linkedin.com/in/andrewstange1/), [Robert Lo](https://robertlo.tech), [Abishek Sridhar](https://www.linkedin.com/in/abishek-sridhar5/), [Kousik Rajesh](https://www.linkedin.com/in/kousik-rajesh/)
 
